@@ -1,4 +1,6 @@
 import pandas as pd
+import numpy as np
+import os
 
 def normalize_column_names(df):
     df.columns = df.columns.str.strip().str.lower()
