@@ -1,0 +1,75 @@
+import pandas as pd
+
+def load_initial_datasets():
+    # Load control and dependent variables
+    corruption_df = pd.read_csv('datasets/corruption.csv')
+    democracy_df = pd.read_csv('datasets/democracy.csv')
+    gdp_df = pd.read_csv('data/gdppercapita.csv')
+    lfpr_df = pd.read_csv('data/lfpr.csv')
+    migration_df = pd.read_csv('data/migration.csv')
+    
+    # Load slavery datasets
+    slavery_2023_df = pd.read_csv('data/slavery_2023.csv')
+    slavery_2018_df = pd.read_csv('data/slavery_2018.csv')
+    slavery_2016_df = pd.read_csv('data/slavery_2016.csv')
+    
+    return {
+        'corruption': corruption_df,
+        'democracy': democracy_df,
+        'gdppercapita': gdp_df,
+        'lfpr': lfpr_df,
+        'migration': migration_df,
+        'slavery_2023': slavery_2023_df,
+        'slavery_2018': slavery_2018_df,
+        'slavery_2016': slavery_2016_df
+    }
+
+def preprocess_lfpr(df):
+    # Pivot LFPR data to get separate columns for each Type_LFPR
+    lfpr_pivoted = df.pivot_table(
+        index=['Country', 'Year'],
+        columns='Type_LFPR',
+        values='LFPR'
+    ).reset_index()
+    
+    return lfpr_pivoted
+
+def merge_datasets(dfs, target_year):
+    """
+    Merge all datasets for a specific target year
+    """
+    # Start with the slavery dataset for the target year
+    slavery_key = f'slavery_{target_year}'
+    merged_df = dfs[slavery_key].copy()
+    
+    # Merge with control variables
+    for name, df in dfs.items():
+        if name not in ['slavery_2023', 'slavery_2018', 'slavery_2016']:
+            if name == 'lfpr':
+                df = preprocess_lfpr(df)
+            
+            merged_df = merged_df.merge(
+                df[df['Year'] == target_year],
+                on='Country',
+                how='left',
+                suffixes=('', f'_{name}')
+            )
+    
+    return merged_df
+
+def main():
+    # Load all datasets
+    datasets = load_initial_datasets()
+    
+    # Create merged datasets for each slavery year
+    merged_2023 = merge_datasets(datasets, 2023)
+    merged_2018 = merge_datasets(datasets, 2018)
+    merged_2016 = merge_datasets(datasets, 2016)
+    
+    # Save merged datasets
+    merged_2023.to_csv('processed_data/merged_2023.csv', index=False)
+    merged_2018.to_csv('processed_data/merged_2018.csv', index=False)
+    merged_2016.to_csv('processed_data/merged_2016.csv', index=False)
+
+if __name__ == "__main__":
+    main()
