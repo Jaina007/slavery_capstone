@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+from standardization import main_standardize
 
 def normalize_column_names(df):
     df.columns = df.columns.str.strip().str.lower()
@@ -8,22 +9,44 @@ def normalize_column_names(df):
 
 def load_initial_datasets():
     try:
-        # Load datasets with normalized column names
-        datasets = {
-            'corruption': pd.read_csv('datasets/corruption.csv'),
-            'democracy': pd.read_csv('datasets/democracy.csv'),
-            'gdppercapita': pd.read_csv('datasets/gdppercapita.csv'),
-            'lfpr': pd.read_csv('datasets/lfpr.csv'),
-            'migration': pd.read_csv('datasets/migration.csv'),
-            'slavery_2023': pd.read_csv('datasets/slavery_2023.csv'),
-            'slavery_2018': pd.read_csv('datasets/slavery_2018.csv'),
-            'slavery_2016': pd.read_csv('datasets/slavery_2016.csv')
+        # List of encodings to try
+        encodings = ['utf-8', 'latin1', 'iso-8859-1', 'cp1252']
+        datasets = {}
+        
+        files = {
+            'corruption': 'datasets/corruption.csv',
+            'democracy': 'datasets/democracy.csv',
+            'gdppercapita': 'datasets/gdppercapita.csv',
+            'lfpr': 'datasets/lfpr.csv',
+            'migration': 'datasets/migration.csv',
+            'slavery_2023': 'datasets/slavery_2023.csv',
+            'slavery_2018': 'datasets/slavery_2018.csv',
+            'slavery_2016': 'datasets/slavery_2016.csv'
         }
+        
+        for name, file_path in files.items():
+            success = False
+            for encoding in encodings:
+                try:
+                    print(f"Trying to load {name} with {encoding} encoding...")
+                    df = pd.read_csv(file_path, encoding=encoding)
+                    datasets[name] = df
+                    print(f"Successfully loaded {name} with {encoding} encoding")
+                    success = True
+                    break
+                except UnicodeDecodeError:
+                    continue
+                except FileNotFoundError:
+                    print(f"File not found: {file_path}")
+                    raise
+            
+            if not success:
+                raise ValueError(f"Failed to load {name} with any encoding")
         
         # Normalize column names for all datasets
         return {name: normalize_column_names(df) for name, df in datasets.items()}
     
-    except FileNotFoundError as e:
+    except Exception as e:
         print(f"Error loading datasets: {e}")
         raise
 
@@ -119,7 +142,7 @@ def merge_datasets(dfs, target_year):
         print(f"Error merging datasets: {e}")
         raise
 
-def main():
+def main_process():
     try:
         # Create output directory if it doesn't exist
         import os
@@ -296,7 +319,7 @@ def verify_filtered_datasets(filtered_datasets):
     except Exception as e:
         print(f"Error verifying datasets: {e}")
 
-def main():
+def main_analyze():
     try:
         # Load original merged datasets
         print("Loading datasets...")
@@ -321,10 +344,65 @@ def main():
     except Exception as e:
         print(f"Error in main execution: {e}")
         
-if __name__ == "__main__":
+def process_initial_data():
+    """Initial data processing function - runs first"""
     try:
-        print("Loading and analyzing merged datasets...")
-        datasets = load_merged_datasets()
-        compare_datasets(datasets)
+        # Create output directory if it doesn't exist
+        os.makedirs('processed_data', exist_ok=True)
+        
+        # Load and verify datasets
+        print("Loading datasets...")
+        datasets = load_initial_datasets()
+        
+        print("\nVerifying datasets...")
+        verify_datasets(datasets)
+        
+        # Process each year
+        for year in [2023, 2018, 2016]:
+            print(f"\nProcessing year {year}...")
+            merged_df = merge_datasets(datasets, year)
+            
+            # Save merged dataset
+            output_path = f'processed_data/merged_{year}.csv'
+            merged_df.to_csv(output_path, index=False)
+            print(f"Saved merged dataset to {output_path}")
+            
+            # Print summary statistics
+            print(f"Final shape: {merged_df.shape}")
+            print("Columns:", merged_df.columns.tolist())
+        
+        return True
+    
     except Exception as e:
-        print(f"Error in main execution: {e}")
+        print(f"Error in initial data processing: {e}")
+        return False
+
+def analyze_processed_data():
+    """Analysis function - runs after initial processing"""
+    try:
+        print("\nLoading and analyzing merged datasets...")
+        datasets = load_merged_datasets()
+        if datasets:
+            compare_datasets(datasets)
+            
+            # Get common countries and filter datasets
+            common_countries = get_common_countries(datasets)
+            if common_countries:
+                filtered_datasets = filter_and_save_datasets(datasets, common_countries)
+                if filtered_datasets:
+                    verify_filtered_datasets(filtered_datasets)
+    
+    except Exception as e:
+        print(f"Error in data analysis: {e}")
+
+if __name__ == "__main__":
+    # First run the existing data processing
+    print("Step 1: Initial data processing")
+    if process_initial_data():
+        # Then run the existing analysis
+        print("\nStep 2: Analyzing processed data")
+        analyze_processed_data()
+        
+        # Finally, run the standardization
+        print("\nStep 3: Standardizing datasets")
+        standardized_datasets = main_standardize()
