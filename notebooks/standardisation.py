@@ -7,6 +7,7 @@ from scipy.stats import ConstantInputWarning
 import os
 import matplotlib.pyplot as plt
 import seaborn as sns
+import statsmodels.api as sm
 
 # Suppress specific warnings
 warnings.filterwarnings('ignore', category=ConstantInputWarning)
@@ -408,75 +409,6 @@ def ensure_consistent_columns(datasets):
         print(f"Error ensuring consistent columns: {str(e)}")
         return datasets
 
-def analyze_correlations(datasets):
-    """
-    Analyze correlations across years
-    """
-    try:
-        print("\nAnalyzing correlations with modern slavery prevalence:")
-        
-        key_variables = [
-            'vulnerability_total', 'governance_score', 'corruption_score',
-            'democracy_score', 'gdp_per_capita', 'basic_needs_score',
-            'inequality_score', 'conflict_score', 'government_response_total'
-        ]
-        
-        for year, df in datasets.items():
-            print(f"\nYear {year}:")
-            
-            # Ensure prevalence column exists
-            prevalence_col = 'prevalence_per_1000'
-            if prevalence_col not in df.columns:
-                print(f"Warning: No prevalence column found for {year}")
-                continue
-            
-            # Calculate correlations
-            correlations = {}
-            p_values = {}
-            
-            for var in key_variables:
-                if var in df.columns:
-                    # Get complete cases only
-                    mask = df[[prevalence_col, var]].notna().all(axis=1)
-                    if mask.sum() > 1:  # Need at least 2 points for correlation
-                        x = df.loc[mask, prevalence_col]
-                        y = df.loc[mask, var]
-                        
-                        corr, p_val = stats.pearsonr(x, y)
-                        correlations[var] = corr
-                        p_values[var] = p_val
-            
-            if correlations:
-                # Perform multiple testing correction
-                corrected_p = perform_multiple_testing_correction(list(p_values.values()))
-                
-                # Create results DataFrame
-                results_df = pd.DataFrame({
-                    'variable': list(correlations.keys()),
-                    'correlation': list(correlations.values()),
-                    'p_value': list(p_values.values()),
-                    'corrected_p': corrected_p
-                })
-                
-                # Sort by absolute correlation
-                results_df['abs_corr'] = abs(results_df['correlation'])
-                results_df = results_df.sort_values('abs_corr', ascending=False)
-                results_df = results_df.drop('abs_corr', axis=1)
-                
-                # Print significant correlations
-                sig_results = results_df[results_df['corrected_p'] < 0.05]
-                if not sig_results.empty:
-                    print("\nSignificant correlations:")
-                    for _, row in sig_results.iterrows():
-                        print(f"{row['variable']}: r={row['correlation']:.3f}, p={row['corrected_p']:.3e}")
-                else:
-                    print("No significant correlations found")
-            else:
-                print("No valid correlations could be calculated")
-        
-    except Exception as e:
-        print(f"Error in correlation analysis: {str(e)}")
-
 def create_visualizations(datasets):
     """
     Create visualizations for key relationships
@@ -606,47 +538,311 @@ def print_summary_statistics(df, year):
     print("\nNumeric variables summary:")
     print(df.select_dtypes(include=[np.number]).describe())
 
+def perform_regression_analysis(datasets):
+    """
+    Perform regression analysis for each year
+    """
+    try:
+        print("\nPerforming Regression Analysis:")
+        
+        # Independent variables
+        predictors = [
+            'vulnerability_total', 'governance_score', 'corruption_score',
+            'democracy_score', 'basic_needs_score', 'inequality_score',
+            'conflict_score', 'government_response_total'
+        ]
+        
+        for year, df in datasets.items():
+            print(f"\nYear {year}:")
+            
+            # Get available predictors
+            available_predictors = [var for var in predictors if var in df.columns]
+            
+            if 'prevalence_per_1000' not in df.columns:
+                print("Warning: No prevalence column found")
+                continue
+            
+            # Prepare data
+            model_df = df[['prevalence_per_1000'] + available_predictors].copy()
+            model_df = model_df.dropna()
+            
+            if len(model_df) < len(available_predictors) + 2:
+                print("Not enough complete cases for regression")
+                continue
+            
+            # Standardize predictors
+            X = model_df[available_predictors]
+            y = model_df['prevalence_per_1000']
+            
+            # Add constant
+            X = sm.add_constant(X)
+            
+            # Fit model
+            model = sm.OLS(y, X).fit()
+            
+            # Print results
+            print("\nRegression Results:")
+            print(f"R-squared: {model.rsquared:.4f}")
+            print(f"Adjusted R-squared: {model.rsquared_adj:.4f}")
+            print("\nCoefficients:")
+            
+            # Get coefficients and p-values
+            coef_df = pd.DataFrame({
+                'coef': model.params,
+                'std_err': model.bse,
+                't_value': model.tvalues,
+                'p_value': model.pvalues
+            })
+            
+            # Apply multiple testing correction
+            coef_df['corrected_p'] = perform_multiple_testing_correction(
+                coef_df['p_value']
+            )
+            
+            # Save results
+            coef_df.to_csv(f'processed_data/regression_results_{year}.csv')
+            
+            # Print all coefficients
+            for var in coef_df.index:
+                print(f"\n{var}:")
+                print(f"  Coefficient: {coef_df.loc[var, 'coef']:.3f}")
+                print(f"  t-value: {coef_df.loc[var, 't_value']:.3f}")
+                print(f"  Original p-value: {coef_df.loc[var, 'p_value']:.3e}")
+                print(f"  Corrected p-value: {coef_df.loc[var, 'corrected_p']:.3e}")
+    
+    except Exception as e:
+        print(f"Error in regression analysis: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+
+def analyze_correlations_with_correction(datasets):
+    """
+    Analyze correlations with multiple testing correction
+    """
+    try:
+        print("\nAnalyzing Correlations with Multiple Testing Correction:")
+        
+        key_variables = [
+            'vulnerability_total', 'governance_score', 'corruption_score',
+            'democracy_score', 'basic_needs_score', 'inequality_score',
+            'conflict_score', 'government_response_total'
+        ]
+        
+        for year, df in datasets.items():
+            print(f"\nYear {year}:")
+            
+            # Get complete cases only
+            analysis_vars = ['prevalence_per_1000'] + [var for var in key_variables if var in df.columns]
+            analysis_df = df[analysis_vars].dropna()
+            
+            if len(analysis_df) < 2:
+                print("Not enough complete cases for analysis")
+                continue
+            
+            # Calculate correlations
+            correlations = {}
+            p_values = {}
+            
+            for var in key_variables:
+                if var in analysis_df.columns:
+                    mask = analysis_df[[var, 'prevalence_per_1000']].notna().all(axis=1)
+                    if mask.sum() > 1:
+                        x = analysis_df.loc[mask, var]
+                        y = analysis_df.loc[mask, 'prevalence_per_1000']
+                        corr, p_val = stats.pearsonr(x, y)
+                        correlations[var] = corr
+                        p_values[var] = p_val
+            
+            if correlations:
+                # Create results DataFrame
+                results_df = pd.DataFrame({
+                    'variable': list(correlations.keys()),
+                    'correlation': list(correlations.values()),
+                    'p_value': list(p_values.values())
+                })
+                
+                # Perform multiple testing correction
+                results_df['corrected_p'] = perform_multiple_testing_correction(
+                    results_df['p_value'].values
+                )
+                
+                # Sort by absolute correlation
+                results_df['abs_corr'] = abs(results_df['correlation'])
+                results_df = results_df.sort_values('abs_corr', ascending=False)
+                results_df = results_df.drop('abs_corr', axis=1)
+                
+                # Save results
+                results_df.to_csv(f'processed_data/correlation_results_{year}.csv')
+                
+                # Print significant correlations
+                print("\nSignificant correlations (corrected p < 0.05):")
+                sig_results = results_df[results_df['corrected_p'] < 0.05]
+                if not sig_results.empty:
+                    for _, row in sig_results.iterrows():
+                        print(f"{row['variable']}:")
+                        print(f"  r = {row['correlation']:.3f}")
+                        print(f"  Original p-value: {row['p_value']:.3e}")
+                        print(f"  Corrected p-value: {row['corrected_p']:.3e}")
+                else:
+                    print("No significant correlations found")
+            else:
+                print("No valid correlations could be calculated")
+    
+    except Exception as e:
+        print(f"Error in correlation analysis: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+
+def analyze_lfpr_correlations(datasets):
+    """
+    Analyze correlations between LFPR and modern slavery prevalence
+    """
+    print("\nAnalyzing LFPR Correlations:")
+    
+    lfpr_variables = [
+        'lfpr_total', 'lfpr_female', 'lfpr_male',
+        'prevalence_per_1000'
+    ]
+    
+    control_variables = [
+        'gdp_per_capita', 'corruption_score', 'democracy_score',
+        'vulnerability_total', 'government_response_total'
+    ]
+    
+    for year, df in datasets.items():
+        print(f"\nYear {year}:")
+        
+        # Analyze LFPR correlations
+        lfpr_results = {}
+        for var in lfpr_variables[:-1]:  # Exclude prevalence
+            if var in df.columns:
+                mask = df[[var, 'prevalence_per_1000']].notna().all(axis=1)
+                if mask.sum() > 1:
+                    x = df.loc[mask, var]
+                    y = df.loc[mask, 'prevalence_per_1000']
+                    corr, p_val = stats.pearsonr(x, y)
+                    lfpr_results[var] = {
+                        'correlation': corr,
+                        'p_value': p_val
+                    }
+        
+        # Print LFPR correlations
+        print("\nLFPR Correlations with Modern Slavery Prevalence:")
+        for var, results in lfpr_results.items():
+            print(f"\n{var}:")
+            print(f"  r = {results['correlation']:.3f}")
+            print(f"  p-value = {results['p_value']:.3e}")
+        
+        # Analyze by gender gap
+        if 'lfpr_female' in df.columns and 'lfpr_male' in df.columns:
+            df['lfpr_gender_gap'] = df['lfpr_male'] - df['lfpr_female']
+            mask = df[['lfpr_gender_gap', 'prevalence_per_1000']].notna().all(axis=1)
+            if mask.sum() > 1:
+                corr, p_val = stats.pearsonr(
+                    df.loc[mask, 'lfpr_gender_gap'],
+                    df.loc[mask, 'prevalence_per_1000']
+                )
+                print("\nLFPR Gender Gap:")
+                print(f"  r = {corr:.3f}")
+                print(f"  p-value = {p_val:.3e}")
+        
+        # Control variable correlations
+        print("\nControl Variable Correlations:")
+        for var in control_variables:
+            if var in df.columns:
+                mask = df[[var, 'prevalence_per_1000']].notna().all(axis=1)
+                if mask.sum() > 1:
+                    corr, p_val = stats.pearsonr(
+                        df.loc[mask, var],
+                        df.loc[mask, 'prevalence_per_1000']
+                    )
+                    print(f"\n{var}:")
+                    print(f"  r = {corr:.3f}")
+                    print(f"  p-value = {p_val:.3e}")
+
+def perform_lfpr_regression(datasets):
+    """
+    Perform regression analysis focusing on LFPR
+    """
+    print("\nPerforming LFPR Regression Analysis:")
+    
+    for year, df in datasets.items():
+        print(f"\nYear {year}:")
+        
+        # Prepare variables
+        predictors = [
+            'lfpr_total', 'lfpr_gender_gap',
+            'gdp_per_capita', 'corruption_score',
+            'vulnerability_total', 'government_response_total'
+        ]
+        
+        # Calculate gender gap if possible
+        if 'lfpr_female' in df.columns and 'lfpr_male' in df.columns:
+            df['lfpr_gender_gap'] = df['lfpr_male'] - df['lfpr_female']
+        
+        # Get available predictors
+        available_predictors = [var for var in predictors if var in df.columns]
+        
+        if 'prevalence_per_1000' not in df.columns:
+            print("Warning: No prevalence column found")
+            continue
+        
+        # Prepare data
+        model_df = df[['prevalence_per_1000'] + available_predictors].copy()
+        model_df = model_df.dropna()
+        
+        if len(model_df) < len(available_predictors) + 2:
+            print("Not enough complete cases for regression")
+            continue
+        
+        # Standardize predictors
+        X = model_df[available_predictors]
+        y = model_df['prevalence_per_1000']
+        
+        # Add constant
+        X = sm.add_constant(X)
+        
+        # Fit model
+        model = sm.OLS(y, X).fit()
+        
+        # Print results
+        print("\nRegression Results:")
+        print(f"R-squared: {model.rsquared:.4f}")
+        print(f"Adjusted R-squared: {model.rsquared_adj:.4f}")
+        
+        # Print coefficients
+        print("\nCoefficients:")
+        for var in model.params.index:
+            print(f"\n{var}:")
+            print(f"  Coefficient: {model.params[var]:.3f}")
+            print(f"  t-value: {model.tvalues[var]:.3f}")
+            print(f"  p-value: {model.pvalues[var]:.3e}")
+            
 def main_standardize():
-    """
-    Main function to run the standardization pipeline
-    """
+    """Main standardization function"""
     try:
         standardized_datasets = {}
         
         for year in [2016, 2018, 2023]:
             print(f"\nProcessing {year} dataset...")
-            
-            # Load dataset
             df = pd.read_csv(f'processed_data/filtered_merged_{year}.csv')
-            print_summary_statistics(df, year)
-            
-            # Process dataset
             std_df = process_dataset(df, year)
             
             if std_df is not None:
                 standardized_datasets[year] = std_df
         
-        # Ensure consistent columns across datasets
+        # Ensure consistent columns
         standardized_datasets = ensure_consistent_columns(standardized_datasets)
         
-        # Analyze correlations
-        correlation_results = analyze_correlations(standardized_datasets)
+        # Perform LFPR-specific analyses
+        analyze_lfpr_correlations(standardized_datasets)
+        perform_lfpr_regression(standardized_datasets)
         
-        # Create visualizations
-        create_visualizations(standardized_datasets)
+        # Validate
+        validate_standardized_datasets(standardized_datasets)
         
-        # Validate standardized datasets
-        if standardized_datasets:
-            validate_standardized_datasets(standardized_datasets)
-            
-            # Save standardized datasets
-            for year, df in standardized_datasets.items():
-                output_path = f'processed_data/standardized_{year}.csv'
-                df.to_csv(output_path, index=False)
-                print(f"Saved standardized dataset to {output_path}")
-        
-        return standardized_datasets, correlation_results
+        return standardized_datasets
     
     except Exception as e:
         print(f"Error in main standardization process: {str(e)}")
-        return None, None
+        return None

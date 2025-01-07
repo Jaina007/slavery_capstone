@@ -142,6 +142,7 @@ def merge_datasets(dfs, target_year):
         print(f"Error merging datasets: {e}")
         raise
 
+
 def main_process():
     try:
         # Create output directory if it doesn't exist
