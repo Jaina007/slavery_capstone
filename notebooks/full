@@ -211,7 +211,7 @@ class ModernSlaveryAnalysis:
         try:
             results = {}
             
-            for year, df in data.items():
+            for year, df in df.items():
                 print(f"\nStratified Analysis for {year}")
                 year_results = {}
                 
@@ -489,7 +489,7 @@ class ModernSlaveryAnalysis:
         try:
             results = {}
             
-            for year, df in data.items():
+            for year, df in df.items():
                 print(f"\nStratified Analysis for {year}")
                 year_results = {}
                 
@@ -767,7 +767,7 @@ class ModernSlaveryAnalysis:
         try:
             results = {}
             
-            for year, df in data.items():
+            for year, df in df.items():
                 print(f"\nAnalyzing Gender Disparities for {year}")
                 
                 # Calculate gender gap in LFPR

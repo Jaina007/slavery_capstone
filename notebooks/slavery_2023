@@ -18,6 +18,21 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import statsmodels.api as sm
 
+from standardisation import (
+    create_output_directories,
+    load_initial_datasets,
+    verify_datasets,
+    merge_datasets,
+    standardize_column_names,
+    convert_data_types,
+    standardize_numeric_values,
+    calculate_correlations,
+    save_results,
+    create_visualizations,
+    get_common_countries,
+    filter_and_save_datasets
+)
+
 # Suppress specific warnings
 warnings.filterwarnings('ignore', category=ConstantInputWarning)
 
@@ -457,69 +472,41 @@ def analyze_lfpr_correlations(datasets):
             print(f"  FDR p-value: {corrected_results['fdr_bh_corrected_p'][var]:.3e}")
 
 if __name__ == "__main__":
-    # Create necessary directories
-    create_output_directories()
     try:
-        # Step 1: Initial Processing
-        print("Step 1: Initial data processing")
-        if process_initial_data():
+        # Previous code remains the same until processed_datasets is created
+        
+        if processed_datasets:
+            print("\nStep 6: Creating visualizations and performing analyses...")
             
-            # Step 2: Load and Analyze
-            print("\nStep 2: Loading and analyzing processed data")
-            datasets = load_merged_datasets()
+            # Create basic visualizations
+            create_visualizations(processed_datasets)
             
-            if datasets:
-                # Step 3: Get Common Countries
-                print("\nStep 3: Finding common countries")
-                common_countries = get_common_countries(datasets)
+            # Create correlation plots
+            create_correlation_plots(processed_datasets)
+            
+            # Perform stratified analysis
+            stratified_results = perform_stratified_analysis(processed_datasets)
+            
+            # Apply multiple testing corrections to correlation results
+            for year, df in processed_datasets.items():
+                correlations, p_values = calculate_correlations(df)
+                corrected_results = apply_multiple_testing_corrections({
+                    'correlations': correlations,
+                    'p_values': p_values
+                })
                 
-                if common_countries:
-                    # Step 4: Filter and Save
-                    print("\nStep 4: Filtering datasets")
-                    filtered_datasets = filter_and_save_datasets(datasets, common_countries)
-                    
-                    if filtered_datasets:
-                        # Step 5: Standardize
-                        print("\nStep 5: Standardizing data")
-                        standardized_datasets = {}
-                        for year, df in filtered_datasets.items():
-                            std_df = process_dataset(df, year)
-                            if std_df is not None:
-                                standardized_datasets[year] = std_df
-                        
-                        if standardized_datasets:
-                            # Step 6: Analysis
-                            print("\nStep 6: Performing analyses")
-                            
-                            # Correlation analysis
-                            print("\nPerforming correlation analysis...")
-                            analyze_correlations_with_correction(standardized_datasets)
-                            
-                            # LFPR analysis
-                            print("\nAnalyzing LFPR relationships...")
-                            analyze_lfpr_correlations(standardized_datasets)
-                            
-                            # Create visualizations
-                            print("\nCreating visualizations...")
-                            create_correlation_plots(standardized_datasets)
-                            create_advanced_visualizations(standardized_datasets)
-                            
-                            # Additional analyses
-                            print("\nPerforming additional analyses...")
-                            perform_stratified_analysis(standardized_datasets)
-                            robustness_checks(standardized_datasets)
-                            
-                            print("\nAnalysis complete! Check the 'processed_data' and 'plots' directories for results.")
-                        else:
-                            print("Error: Standardization failed")
-                    else:
-                        print("Error: Filtering failed")
-                else:
-                    print("Error: No common countries found")
-            else:
-                print("Error: Could not load datasets")
+                # Print results
+                print(f"\nResults for {year} with multiple testing corrections:")
+                for var in correlations.keys():
+                    print(f"\n{var}:")
+                    print(f"Correlation: {correlations[var]:.3f}")
+                    print(f"Original p-value: {p_values[var]:.3e}")
+                    for method in ['bonferroni', 'holm', 'fdr_bh']:
+                        print(f"{method} corrected p-value: {corrected_results[f'{method}_corrected_p'][var]:.3e}")
+            
+            print("\nAnalysis complete! Check the 'processed_data' and 'plots' directories for results.")
         else:
-            print("Error: Initial processing failed")
+            print("No datasets were successfully processed")
             
     except Exception as e:
         print(f"Error in main execution: {str(e)}")

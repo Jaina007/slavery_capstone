@@ -9,19 +9,14 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import statsmodels.api as sm
 
-    # Set up matplotlib backend
+# Set up matplotlib backend
 try:
         import matplotlib
         matplotlib.use('Agg')
 except Exception as e:
         print(f"Warning: Visualization setup error: {e}")
 
-    # Now import matplotlib and seaborn
-import matplotlib.pyplot as plt
-import seaborn as sns
-import statsmodels.api as sm
-
-    # Suppress specific warnings
+# Suppress specific warnings
 warnings.filterwarnings('ignore', category=ConstantInputWarning)
 
     # Create output directories
@@ -33,9 +28,6 @@ def create_output_directories():
 
 # Create directories at startup
 create_output_directories()
-
-    # Suppress specific warnings
-warnings.filterwarnings('ignore', category=ConstantInputWarning)
 
 def standardize_column_names(df, year):
         """
@@ -281,31 +273,37 @@ def standardize_numeric_values(df):
 
 def process_dataset(df, year):
     """
-    Process a single dataset through the standardization pipeline
+    Process a single dataset through the standardization pipeline with validation
     """
     try:
         # Step 1: Standardize column names
         std_df = standardize_column_names(df, year)
-        
+
         # Step 2: Convert data types
         std_df = convert_data_types(std_df)
-        
-        # Step 3: Handle missing values
+
+        # Step 3: Validate required columns before proceeding
+        if not check_required_columns(std_df, year):
+            print(f"Warning: Data validation failed for {year}")
+            return None  # Early exit if validation fails
+
+        # Step 4: Handle missing values using median imputation
         numeric_cols = std_df.select_dtypes(include=[np.number]).columns
         for col in numeric_cols:
             if std_df[col].isnull().any():
                 median_val = std_df[col].median()
                 std_df[col] = std_df[col].fillna(median_val)
-                print(f"Filled {std_df[col].isnull().sum()} missing values in {col} with median")
-        
-        # Step 4: Standardize numeric values
+                print(f"Filled missing values in {col} with median")
+
+        # Step 5: Standardize numeric values using z-score normalization
         std_df = standardize_numeric_values(std_df)
-        
+
         return std_df
-    
+
     except Exception as e:
         print(f"Error processing dataset for year {year}: {str(e)}")
         return None
+
     
 def perform_multiple_testing_correction(p_values, method='bonferroni', alpha=0.05):
         """
@@ -361,38 +359,6 @@ def calculate_correlations(df, target_col='prevalence_per_1000'):
                 continue
         
         return correlations, p_values
-
-def process_dataset(df, year):
-        """
-        Process a single dataset through the standardization pipeline
-        """
-        try:
-            # Step 1: Standardize column names
-            std_df = standardize_column_names(df, year)
-            
-            # Step 2: Convert data types
-            std_df = convert_data_types(std_df)
-            
-            # Step 3: Check required columns and data validity
-            if not check_required_columns(std_df, year):
-                print(f"Warning: Data validation failed for {year}")
-            
-            # Step 4: Handle missing values
-            numeric_cols = std_df.select_dtypes(include=[np.number]).columns
-            for col in numeric_cols:
-                if std_df[col].isnull().any():
-                    median_val = std_df[col].median()
-                    std_df[col] = std_df[col].fillna(median_val)
-                    print(f"Filled {std_df[col].isnull().sum()} missing values in {col} with median")
-            
-            # Step 5: Standardize numeric values
-            std_df = standardize_numeric_values(std_df)
-            
-            return std_df
-        
-        except Exception as e:
-            print(f"Error processing dataset for year {year}: {str(e)}")
-            return None
         
 def validate_standardized_datasets(datasets):
         """
@@ -679,82 +645,29 @@ def perform_regression_analysis(datasets):
             print(traceback.format_exc())
 
 def analyze_correlations_with_correction(datasets):
-        """
-        Analyze correlations with multiple testing correction
-        """
-        try:
-            print("\nAnalyzing Correlations with Multiple Testing Correction:")
-            
-            key_variables = [
-                'vulnerability_total', 'governance_score', 'corruption_score',
-                'democracy_score', 'basic_needs_score', 'inequality_score',
-                'conflict_score', 'government_response_total'
-            ]
-            
-            for year, df in datasets.items():
-                print(f"\nYear {year}:")
-                
-                # Get complete cases only
-                analysis_vars = ['prevalence_per_1000'] + [var for var in key_variables if var in df.columns]
-                analysis_df = df[analysis_vars].dropna()
-                
-                if len(analysis_df) < 2:
-                    print("Not enough complete cases for analysis")
-                    continue
-                
-                # Calculate correlations
-                correlations = {}
-                p_values = {}
-                
-                for var in key_variables:
-                    if var in analysis_df.columns:
-                        mask = analysis_df[[var, 'prevalence_per_1000']].notna().all(axis=1)
-                        if mask.sum() > 1:
-                            x = analysis_df.loc[mask, var]
-                            y = analysis_df.loc[mask, 'prevalence_per_1000']
-                            corr, p_val = stats.pearsonr(x, y)
-                            correlations[var] = corr
-                            p_values[var] = p_val
-                
-                if correlations:
-                    # Create results DataFrame
-                    results_df = pd.DataFrame({
-                        'variable': list(correlations.keys()),
-                        'correlation': list(correlations.values()),
-                        'p_value': list(p_values.values())
-                    })
-                    
-                    # Perform multiple testing correction
-                    results_df['corrected_p'] = perform_multiple_testing_correction(
-                        results_df['p_value'].values
-                    )
-                    
-                    # Sort by absolute correlation
-                    results_df['abs_corr'] = abs(results_df['correlation'])
-                    results_df = results_df.sort_values('abs_corr', ascending=False)
-                    results_df = results_df.drop('abs_corr', axis=1)
-                    
-                    # Save results
-                    results_df.to_csv(f'processed_data/correlation_results_{year}.csv')
-                    
-                    # Print significant correlations
-                    print("\nSignificant correlations (corrected p < 0.05):")
-                    sig_results = results_df[results_df['corrected_p'] < 0.05]
-                    if not sig_results.empty:
-                        for _, row in sig_results.iterrows():
-                            print(f"{row['variable']}:")
-                            print(f"  r = {row['correlation']:.3f}")
-                            print(f"  Original p-value: {row['p_value']:.3e}")
-                            print(f"  Corrected p-value: {row['corrected_p']:.3e}")
-                    else:
-                        print("No significant correlations found")
-                else:
-                    print("No valid correlations could be calculated")
+    """
+    Analyze correlations with multiple testing correction across datasets
+    """
+    for year, df in datasets.items():
+        print(f"\nYear {year}:")
         
-        except Exception as e:
-            print(f"Error in correlation analysis: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
+        # Calculate correlations and p-values
+        correlations, p_values = calculate_correlations(df)
+        
+        # Apply multiple correction methods
+        corrected_results = apply_multiple_testing_corrections({
+            'correlations': correlations,
+            'p_values': p_values
+        })
+
+        # Print results
+        print("\nCorrelation Results with Multiple Testing Corrections:")
+        for var, corr in corrected_results['correlations'].items():
+            print(f"\n{var}:")
+            print(f"  Correlation: {corr:.3f}")
+            print(f"  Original p-value: {corrected_results['p_values'][var]:.3e}")
+            for method in ['bonferroni', 'holm', 'simes']:
+                print(f"  {method.capitalize()} corrected p-value: {corrected_results[f'{method}_corrected_p'][var]:.3e}")
 
 def analyze_lfpr_correlations(datasets):
         """
@@ -1204,29 +1117,24 @@ def robustness_checks(datasets):
                     print(f"{name}: {coef:.3f}")
 
 def apply_multiple_testing_corrections(correlations_dict):
-    """
-    Apply multiple testing corrections to correlation p-values
-    """
     from statsmodels.stats.multitest import multipletests
-    
-    # Extract p-values
+
+    # Extract p-values correctly
     p_values = list(correlations_dict['p_values'].values())
-    
-    # Apply different correction methods
+
+    # Apply multiple testing corrections
     corrections = {
         'bonferroni': multipletests(p_values, method='bonferroni')[1],
         'holm': multipletests(p_values, method='holm')[1],
-        'fdr_bh': multipletests(p_values, method='fdr_bh')[1]
+        'simes': multipletests(p_values, method='simes')[1]
     }
-    
-    # Add corrected p-values to results
+
+    # Fix: Proper handling of corrected p-values
     results = correlations_dict.copy()
-    for method, corrected_p in corrections.items():
-        results[f'{method}_corrected_p'] = dict(zip(
-            correlations_dict['p_values'].keys(),
-            corrected_p
-        ))
-    
+    for method, corrected_p_values in corrections.items():
+        corrected_p_dict = dict(zip(correlations_dict['p_values'].keys(), corrected_p_values))
+        results[f'{method}_corrected_p'] = corrected_p_dict
+
     return results
 
 def create_correlation_plots(datasets):
@@ -1327,3 +1235,512 @@ def main_standardize():
         except Exception as e:
             print(f"Error in main standardization process: {str(e)}")
             return None
+        
+import pandas as pd
+import numpy as np
+import os
+from scipy import stats
+from sklearn.preprocessing import StandardScaler
+import warnings
+from scipy.stats import ConstantInputWarning
+
+# Set up matplotlib backend
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+except Exception as e:
+    print(f"Warning: Visualization setup error: {e}")
+
+# Now import matplotlib and seaborn
+import matplotlib.pyplot as plt
+import seaborn as sns
+import statsmodels.api as sm
+
+# Suppress specific warnings
+warnings.filterwarnings('ignore', category=ConstantInputWarning)
+
+# Create output directories
+def create_output_directories():
+    """Create necessary output directories"""
+    directories = ['processed_data', 'plots', 'plots/advanced']
+    for directory in directories:
+        os.makedirs(directory, exist_ok=True)
+
+# Create directories at startup
+create_output_directories()
+
+# Rest of your code follows...
+
+def normalize_column_names(df):
+    df.columns = df.columns.str.strip().str.lower()
+    return df
+
+def load_initial_datasets():
+    try:
+        # List of encodings to try
+        encodings = ['utf-8', 'latin1', 'iso-8859-1', 'cp1252']
+        datasets = {}
+        
+        files = {
+            'corruption': 'datasets/corruption.csv',
+            'democracy': 'datasets/democracy.csv',
+            'gdppercapita': 'datasets/gdppercapita.csv',
+            'lfpr': 'datasets/lfpr.csv',
+            'migration': 'datasets/migration.csv',
+            'slavery_2023': 'datasets/slavery_2023.csv',
+            'slavery_2018': 'datasets/slavery_2018.csv',
+            'slavery_2016': 'datasets/slavery_2016.csv'
+        }
+        
+        for name, file_path in files.items():
+            success = False
+            for encoding in encodings:
+                try:
+                    print(f"Trying to load {name} with {encoding} encoding...")
+                    df = pd.read_csv(file_path, encoding=encoding)
+                    datasets[name] = df
+                    print(f"Successfully loaded {name} with {encoding} encoding")
+                    success = True
+                    break
+                except UnicodeDecodeError:
+                    continue
+                except FileNotFoundError:
+                    print(f"File not found: {file_path}")
+                    raise
+            
+            if not success:
+                raise ValueError(f"Failed to load {name} with any encoding")
+        
+        # Normalize column names for all datasets
+        return {name: normalize_column_names(df) for name, df in datasets.items()}
+    
+    except Exception as e:
+        print(f"Error loading datasets: {e}")
+        raise
+
+def verify_datasets(dfs):
+    for name, df in dfs.items():
+        print(f"\nVerifying dataset: {name}")
+        print(f"Shape: {df.shape}")
+        print(f"Columns: {df.columns.tolist()}")
+        
+        # Check for required columns
+        required_cols = ['country', 'year']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        
+        if missing_cols:
+            print(f"Warning: Missing required columns: {missing_cols}")
+        
+        # Check for null values
+        null_counts = df.isnull().sum()
+        if null_counts.any():
+            print("Null value counts:")
+            print(null_counts[null_counts > 0])
+
+def standardize_country_names(df):
+    country_mapping = {
+        "United States": "USA",
+        "United Kingdom": "UK",
+        "United States of America": "USA",
+        "Great Britain": "UK",
+        # Add more mappings as needed
+    }
+    df['country'] = df['country'].replace(country_mapping)
+    return df
+
+def preprocess_lfpr(df):
+    try:
+        # Ensure required columns exist
+        required_cols = ['country', 'year', 'type_lfpr', 'lfpr']
+        if not all(col in df.columns for col in required_cols):
+            raise ValueError(f"LFPR dataset missing required columns. Found: {df.columns.tolist()}")
+        
+        # Pivot LFPR data
+        lfpr_pivoted = df.pivot_table(
+            index=['country', 'year'],
+            columns='type_lfpr',
+            values='lfpr'
+        ).reset_index()
+        
+        # Rename columns to lowercase
+        lfpr_pivoted.columns = lfpr_pivoted.columns.str.lower()
+        
+        return lfpr_pivoted
+    
+    except Exception as e:
+        print(f"Error preprocessing LFPR data: {e}")
+        raise
+
+def merge_datasets(dfs, target_year):
+    try:
+        slavery_key = f'slavery_{target_year}'
+        if slavery_key not in dfs:
+            raise KeyError(f"Missing slavery dataset for year {target_year}")
+        
+        # Start with standardized slavery dataset
+        merged_df = standardize_country_names(dfs[slavery_key].copy())
+        
+        # Merge with other datasets
+        for name, df in dfs.items():
+            if name not in ['slavery_2023', 'slavery_2018', 'slavery_2016']:
+                print(f"Processing {name} dataset...")
+                
+                # Standardize country names
+                df = standardize_country_names(df)
+                
+                # Preprocess LFPR if needed
+                if name == 'lfpr':
+                    df = preprocess_lfpr(df)
+                
+                # Filter for target year and merge
+                year_data = df[df['year'] == target_year]
+                if not year_data.empty:
+                    merged_df = merged_df.merge(
+                        year_data,
+                        on='country',
+                        how='left',
+                        suffixes=('', f'_{name}')
+                    )
+                    print(f"Merged {name} data: {merged_df.shape}")
+                else:
+                    print(f"Warning: No data for {name} in year {target_year}")
+        
+        return merged_df
+    
+    except Exception as e:
+        print(f"Error merging datasets: {e}")
+        raise
+
+
+def main_process():
+    try:
+        # Create output directory if it doesn't exist
+        import os
+        os.makedirs('processed_data', exist_ok=True)
+        
+        # Load and verify datasets
+        print("Loading datasets...")
+        datasets = load_initial_datasets()
+        
+        print("\nVerifying datasets...")
+        verify_datasets(datasets)
+        
+        # Process each year
+        for year in [2023, 2018, 2016]:
+            print(f"\nProcessing year {year}...")
+            merged_df = merge_datasets(datasets, year)
+            
+            # Save merged dataset
+            output_path = f'processed_data/merged_{year}.csv'
+            merged_df.to_csv(output_path, index=False)
+            print(f"Saved merged dataset to {output_path}")
+            
+            # Print summary statistics
+            print(f"Final shape: {merged_df.shape}")
+            print("Columns:", merged_df.columns.tolist())
+    
+    except Exception as e:
+        print(f"Error in main execution: {e}")
+        raise
+
+def load_merged_datasets():
+    """Load all merged datasets and return basic information about them"""
+    years = [2016, 2018, 2023]
+    datasets = {}
+    
+    for year in years:
+        try:
+            df = pd.read_csv(f'processed_data/merged_{year}.csv')
+            datasets[year] = df
+            
+            print(f"\nMerged Dataset {year}:")
+            print("-" * 50)
+            print(f"Shape: {df.shape}")
+            print("\nFirst few rows:")
+            print(df.head())
+            print("\nColumns:")
+            print(df.columns.tolist())
+            print("\nMissing values:")
+            print(df.isnull().sum()[df.isnull().sum() > 0])
+            print("\nSummary statistics:")
+            print(df.describe())
+            
+            # Check which countries are included
+            print(f"\nNumber of countries: {df['country'].nunique()}")
+            print("\nSample of countries:")
+            print(df['country'].sample(min(5, len(df['country']))).tolist())
+            
+        except FileNotFoundError:
+            print(f"Warning: Could not find merged_{year}.csv in processed_data directory")
+        except Exception as e:
+            print(f"Error processing {year} dataset: {e}")
+    
+    return datasets
+
+def compare_datasets(datasets):
+    """Compare the different year datasets"""
+    try:
+        if not datasets:
+            print("No datasets available for comparison")
+            return
+            
+        years = list(datasets.keys())
+        
+        print("\nDataset Comparison:")
+        print("-" * 50)
+        
+        # Compare number of countries
+        print("\nNumber of countries in each dataset:")
+        for year in years:
+            print(f"{year}: {datasets[year]['country'].nunique()} countries")
+        
+        # Find common countries
+        common_countries = set(datasets[years[0]]['country'])
+        for year in years[1:]:
+            common_countries = common_countries.intersection(set(datasets[year]['country']))
+        
+        print(f"\nNumber of common countries across all years: {len(common_countries)}")
+        print("\nSample of common countries:")
+        print(list(common_countries)[:5])
+        
+    except Exception as e:
+        print(f"Error comparing datasets: {e}")
+
+def load_merged_datasets():
+    """Load all merged datasets"""
+    try:
+        datasets = {}
+        for year in [2016, 2018, 2023]:
+            df = pd.read_csv(f'processed_data/merged_{year}.csv')
+            datasets[year] = df
+        return datasets
+    except Exception as e:
+        print(f"Error loading datasets: {e}")
+        return None
+
+def get_common_countries(datasets):
+    """Get list of countries common to all datasets"""
+    try:
+        # Get sets of countries from each dataset
+        country_sets = [set(df['country'].unique()) for df in datasets.values()]
+        
+        # Get intersection of all sets
+        common_countries = set.intersection(*country_sets)
+        
+        print(f"Number of common countries: {len(common_countries)}")
+        print("\nSample of common countries:")
+        print(sorted(list(common_countries))[:10])
+        
+        return sorted(list(common_countries))
+    except Exception as e:
+        print(f"Error getting common countries: {e}")
+        return None
+
+def filter_and_save_datasets(datasets, common_countries):
+    """Filter datasets to include only common countries and save"""
+    try:
+        filtered_datasets = {}
+        
+        for year, df in datasets.items():
+            # Filter for common countries
+            filtered_df = df[df['country'].isin(common_countries)].copy()
+            
+            # Sort by country name for consistency
+            filtered_df = filtered_df.sort_values('country').reset_index(drop=True)
+            
+            # Save filtered dataset
+            output_path = f'processed_data/filtered_merged_{year}.csv'
+            filtered_df.to_csv(output_path, index=False)
+            
+            filtered_datasets[year] = filtered_df
+            
+            print(f"\nDataset {year}:")
+            print(f"Original shape: {df.shape}")
+            print(f"Filtered shape: {filtered_df.shape}")
+            
+            # Verify all countries are present
+            missing_countries = set(common_countries) - set(filtered_df['country'])
+            if missing_countries:
+                print(f"Warning: Missing countries in {year}: {missing_countries}")
+    
+        return filtered_datasets
+    except Exception as e:
+        print(f"Error filtering datasets: {e}")
+        return None
+
+def verify_filtered_datasets(filtered_datasets):
+    """Verify that filtered datasets contain the same countries"""
+    try:
+        print("\nVerifying filtered datasets:")
+        
+        # Check country counts
+        for year, df in filtered_datasets.items():
+            print(f"\n{year} dataset:")
+            print(f"Number of countries: {df['country'].nunique()}")
+            print("First 5 countries:")
+            print(df['country'].head().tolist())
+            
+        # Verify columns
+        print("\nColumns in each dataset:")
+        for year, df in filtered_datasets.items():
+            print(f"\n{year} columns:")
+            print(df.columns.tolist())
+            
+    except Exception as e:
+        print(f"Error verifying datasets: {e}")
+
+def main_analyze():
+    try:
+        # Load original merged datasets
+        print("Loading datasets...")
+        datasets = load_merged_datasets()
+        
+        if datasets:
+            # Get common countries
+            print("\nFinding common countries...")
+            common_countries = get_common_countries(datasets)
+            
+            if common_countries:
+                # Filter and save datasets
+                print("\nFiltering datasets...")
+                filtered_datasets = filter_and_save_datasets(datasets, common_countries)
+                
+                if filtered_datasets:
+                    # Verify filtered datasets
+                    verify_filtered_datasets(filtered_datasets)
+                    
+                    print("\nSuccess! Filtered datasets have been saved to processed_data/")
+    
+    except Exception as e:
+        print(f"Error in main execution: {e}")
+        
+def process_initial_data():
+    """Initial data processing function - runs first"""
+    try:
+        # Create output directory if it doesn't exist
+        os.makedirs('processed_data', exist_ok=True)
+        
+        # Load and verify datasets
+        print("Loading datasets...")
+        datasets = load_initial_datasets()
+        
+        print("\nVerifying datasets...")
+        verify_datasets(datasets)
+        
+        # Process each year
+        for year in [2023, 2018, 2016]:
+            print(f"\nProcessing year {year}...")
+            merged_df = merge_datasets(datasets, year)
+            
+            # Save merged dataset
+            output_path = f'processed_data/merged_{year}.csv'
+            merged_df.to_csv(output_path, index=False)
+            print(f"Saved merged dataset to {output_path}")
+            
+            # Print summary statistics
+            print(f"Final shape: {merged_df.shape}")
+            print("Columns:", merged_df.columns.tolist())
+        
+        return True
+    
+    except Exception as e:
+        print(f"Error in initial data processing: {e}")
+        return False
+
+def analyze_processed_data():
+    """Analysis function - runs after initial processing"""
+    try:
+        print("\nLoading and analyzing merged datasets...")
+        datasets = load_merged_datasets()
+        if datasets:
+            compare_datasets(datasets)
+            
+            # Get common countries and filter datasets
+            common_countries = get_common_countries(datasets)
+            if common_countries:
+                filtered_datasets = filter_and_save_datasets(datasets, common_countries)
+                if filtered_datasets:
+                    verify_filtered_datasets(filtered_datasets)
+    
+    except Exception as e:
+        print(f"Error in data analysis: {e}")
+
+def analyze_lfpr_correlations(datasets):
+    """
+    Enhanced LFPR correlation analysis with multiple testing correction
+    """
+    for year, df in datasets.items():
+        print(f"\nYear {year}:")
+        
+        # Calculate correlations
+        correlations = calculate_correlations(df)
+        
+        # Apply multiple testing corrections
+        corrected_results = apply_multiple_testing_corrections(correlations)
+        
+        # Create visualizations
+        create_correlation_plots({year: df})
+        
+        # Perform stratified analysis
+        stratified_results = perform_stratified_analysis({year: df})
+        
+        # Print results
+        print("\nCorrelation Results with Multiple Testing Corrections:")
+        for var, corr in corrected_results['correlations'].items():
+            print(f"\n{var}:")
+            print(f"  r = {corr:.3f}")
+            print(f"  Original p-value: {corrected_results['p_values'][var]:.3e}")
+            print(f"  Bonferroni p-value: {corrected_results['bonferroni_corrected_p'][var]:.3e}")
+            print(f"  Holm p-value: {corrected_results['holm_corrected_p'][var]:.3e}")
+            print(f"  FDR p-value: {corrected_results['fdr_bh_corrected_p'][var]:.3e}")
+
+# Ensure the datasets are processed and stored properly
+processed_datasets = main_standardize()  # Ensure this runs successfully before further analysis
+
+if processed_datasets:
+    print("\nStep 6: Creating visualizations and performing analyses...")
+    create_visualizations(processed_datasets)
+else:
+    print("Error: No datasets were successfully processed. Check the earlier steps.")
+
+if __name__ == "__main__":
+    try:
+        # Previous code remains the same until processed_datasets is created
+        
+        if processed_datasets:
+            print("\nStep 6: Creating visualizations and performing analyses...")
+            
+            # Create basic visualizations
+            create_visualizations(processed_datasets)
+            
+            # Create correlation plots
+            create_correlation_plots(processed_datasets)
+            
+            # Perform stratified analysis
+            stratified_results = perform_stratified_analysis(processed_datasets)
+            
+            # Apply multiple testing corrections to correlation results
+            for year, df in processed_datasets.items():
+                correlations, p_values = calculate_correlations(df)
+                corrected_results = apply_multiple_testing_corrections({
+                    'correlations': correlations,
+                    'p_values': p_values
+                })
+                
+                # Print results
+                print(f"\nResults for {year} with multiple testing corrections:")
+                for var in correlations.keys():
+                    print(f"\n{var}:")
+                    print(f"Correlation: {correlations[var]:.3f}")
+                    print(f"Original p-value: {p_values[var]:.3e}")
+                    for method in ['bonferroni', 'holm', 'fdr_bh']:
+                        print(f"{method} corrected p-value: {corrected_results[f'{method}_corrected_p'][var]:.3e}")
+            
+            print("\nAnalysis complete! Check the 'processed_data' and 'plots' directories for results.")
+        else:
+            print("No datasets were successfully processed")
+            
+    except Exception as e:
+        print(f"Error in main execution: {str(e)}")
+        import traceback
+        print(traceback.format_exc())

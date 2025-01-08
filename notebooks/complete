@@ -1,0 +1,254 @@
+# Imports and Setup
+import pandas as pd
+import numpy as np
+import os
+from scipy import stats
+from sklearn.preprocessing import StandardScaler
+import warnings
+from scipy.stats import ConstantInputWarning
+import matplotlib.pyplot as plt
+import seaborn as sns
+import statsmodels.api as sm
+from sklearn.linear_model import HuberRegressor
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+from statsmodels.stats.multitest import multipletests
+
+# Set up matplotlib backend
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+except Exception as e:
+    print(f"Warning: Visualization setup error: {e}")
+
+# Suppress specific warnings
+warnings.filterwarnings('ignore', category=ConstantInputWarning)
+
+# Directory Creation
+def create_output_directories():
+    """Create necessary output directories"""
+    directories = ['processed_data', 'plots', 'plots/advanced']
+    for directory in directories:
+        os.makedirs(directory, exist_ok=True)
+
+# Data Loading and Processing Functions
+def normalize_column_names(df):
+    """Normalize column names to lowercase"""
+    df.columns = df.columns.str.strip().str.lower()
+    return df
+
+def load_initial_datasets():
+    """Load all initial datasets"""
+    try:
+        encodings = ['utf-8', 'latin1', 'iso-8859-1', 'cp1252']
+        datasets = {}
+        files = {
+            'corruption': 'datasets/corruption.csv',
+            'democracy': 'datasets/democracy.csv',
+            'gdppercapita': 'datasets/gdppercapita.csv',
+            'lfpr': 'datasets/lfpr.csv',
+            'migration': 'datasets/migration.csv',
+            'slavery_2023': 'datasets/slavery_2023.csv',
+            'slavery_2018': 'datasets/slavery_2018.csv',
+            'slavery_2016': 'datasets/slavery_2016.csv'
+        }
+        
+        for name, file_path in files.items():
+            for encoding in encodings:
+                try:
+                    df = pd.read_csv(file_path, encoding=encoding)
+                    datasets[name] = normalize_column_names(df)
+                    break
+                except UnicodeDecodeError:
+                    continue
+                except FileNotFoundError:
+                    print(f"File not found: {file_path}")
+                    raise
+        
+        return datasets
+    except Exception as e:
+        print(f"Error loading datasets: {e}")
+        raise
+
+def verify_datasets(dfs):
+    """Verify dataset integrity"""
+    for name, df in dfs.items():
+        print(f"\nVerifying dataset: {name}")
+        print(f"Shape: {df.shape}")
+        print(f"Columns: {df.columns.tolist()}")
+        print("Null values:")
+        print(df.isnull().sum()[df.isnull().sum() > 0])
+
+def standardize_country_names(df):
+    """Standardize country names"""
+    country_mapping = {
+        "United States": "USA",
+        "United Kingdom": "UK",
+        "United States of America": "USA",
+        "Great Britain": "UK"
+    }
+    df['country'] = df['country'].replace(country_mapping)
+    return df
+
+def preprocess_lfpr(df):
+    """Preprocess LFPR data"""
+    try:
+        lfpr_pivoted = df.pivot_table(
+            index=['country', 'year'],
+            columns='type_lfpr',
+            values='lfpr'
+        ).reset_index()
+        lfpr_pivoted.columns = lfpr_pivoted.columns.str.lower()
+        return lfpr_pivoted
+    except Exception as e:
+        print(f"Error preprocessing LFPR data: {e}")
+        raise
+
+def merge_datasets(dfs, target_year):
+    """Merge all datasets for a specific year"""
+    try:
+        slavery_key = f'slavery_{target_year}'
+        merged_df = standardize_country_names(dfs[slavery_key].copy())
+        
+        for name, df in dfs.items():
+            if name not in ['slavery_2023', 'slavery_2018', 'slavery_2016']:
+                df = standardize_country_names(df)
+                if name == 'lfpr':
+                    df = preprocess_lfpr(df)
+                year_data = df[df['year'] == target_year]
+                if not year_data.empty:
+                    merged_df = merged_df.merge(
+                        year_data,
+                        on='country',
+                        how='left',
+                        suffixes=('', f'_{name}')
+                    )
+        
+        return merged_df
+    except Exception as e:
+        print(f"Error merging datasets: {e}")
+        raise
+
+# Analysis Functions
+def calculate_correlations(df, target_col='prevalence_per_1000'):
+    """Calculate correlations with target column"""
+    correlations = {}
+    p_values = {}
+    
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    for col in numeric_cols:
+        if col != target_col:
+            mask = df[[col, target_col]].notna().all(axis=1)
+            if mask.sum() > 1:
+                corr, p_val = stats.pearsonr(df.loc[mask, col], df.loc[mask, target_col])
+                correlations[col] = corr
+                p_values[col] = p_val
+    
+    return {'correlations': correlations, 'p_values': p_values}
+
+def perform_multiple_testing_correction(p_values):
+    """Apply multiple testing corrections"""
+    corrected_p = multipletests(list(p_values.values()), method='fdr_bh')[1]
+    return dict(zip(p_values.keys(), corrected_p))
+
+def create_visualizations(datasets):
+    """Create visualization plots"""
+    os.makedirs('plots', exist_ok=True)
+    
+    # Correlation heatmaps
+    for year, df in datasets.items():
+        plt.figure(figsize=(12, 10))
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        corr_matrix = df[numeric_cols].corr()
+        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', center=0)
+        plt.title(f'Correlation Heatmap - {year}')
+        plt.tight_layout()
+        plt.savefig(f'plots/correlation_heatmap_{year}.png')
+        plt.close()
+
+def perform_regression_analysis(datasets):
+    """Perform regression analysis"""
+    for year, df in datasets.items():
+        print(f"\nRegression Analysis for {year}:")
+        
+        predictors = ['vulnerability_total', 'governance_score', 'corruption_score']
+        X = df[predictors]
+        y = df['prevalence_per_1000']
+        
+        # Standard OLS
+        X = sm.add_constant(X)
+        model = sm.OLS(y, X).fit()
+        print(model.summary())
+        
+        # Robust regression
+        robust_reg = HuberRegressor()
+        robust_reg.fit(X, y)
+        print("\nRobust Regression Coefficients:")
+        for name, coef in zip(predictors, robust_reg.coef_):
+            print(f"{name}: {coef:.4f}")
+
+# Main Processing Functions
+def process_initial_data():
+    """Initial data processing"""
+    try:
+        datasets = load_initial_datasets()
+        verify_datasets(datasets)
+        
+        for year in [2023, 2018, 2016]:
+            merged_df = merge_datasets(datasets, year)
+            merged_df.to_csv(f'processed_data/merged_{year}.csv', index=False)
+        
+        return True
+    except Exception as e:
+        print(f"Error in initial processing: {e}")
+        return False
+
+def analyze_processed_data():
+    """Analyze processed data"""
+    try:
+        datasets = {}
+        for year in [2023, 2018, 2016]:
+            df = pd.read_csv(f'processed_data/merged_{year}.csv')
+            datasets[year] = df
+        
+        # Perform analyses
+        for year, df in datasets.items():
+            print(f"\nAnalyzing {year} dataset:")
+            correlations = calculate_correlations(df)
+            corrected_p = perform_multiple_testing_correction(correlations['p_values'])
+            
+            print("\nSignificant correlations (p < 0.05):")
+            for var, p_val in corrected_p.items():
+                if p_val < 0.05:
+                    print(f"{var}: r={correlations['correlations'][var]:.3f}, p={p_val:.3e}")
+        
+        create_visualizations(datasets)
+        perform_regression_analysis(datasets)
+        
+        return datasets
+    except Exception as e:
+        print(f"Error in data analysis: {e}")
+        return None
+
+# Main Execution
+if __name__ == "__main__":
+    try:
+        # Create directories
+        create_output_directories()
+        
+        # Step 1: Initial Processing
+        print("Step 1: Processing initial data...")
+        if process_initial_data():
+            
+            # Step 2: Analysis
+            print("\nStep 2: Analyzing processed data...")
+            datasets = analyze_processed_data()
+            
+            if datasets is not None:
+                print("\nAnalysis complete! Check the 'processed_data' and 'plots' directories for results.")
+            else:
+                print("\nAnalysis failed!")
+        else:
+            print("\nInitial processing failed!")
+            
+    except Exception as e:
+        print(f"Error in main execution: {str(e)}")
