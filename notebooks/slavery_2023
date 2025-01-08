@@ -1,7 +1,37 @@
 import pandas as pd
 import numpy as np
 import os
-from standardisation import main_standardize
+from scipy import stats
+from sklearn.preprocessing import StandardScaler
+import warnings
+from scipy.stats import ConstantInputWarning
+
+# Set up matplotlib backend
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+except Exception as e:
+    print(f"Warning: Visualization setup error: {e}")
+
+# Now import matplotlib and seaborn
+import matplotlib.pyplot as plt
+import seaborn as sns
+import statsmodels.api as sm
+
+# Suppress specific warnings
+warnings.filterwarnings('ignore', category=ConstantInputWarning)
+
+# Create output directories
+def create_output_directories():
+    """Create necessary output directories"""
+    directories = ['processed_data', 'plots', 'plots/advanced']
+    for directory in directories:
+        os.makedirs(directory, exist_ok=True)
+
+# Create directories at startup
+create_output_directories()
+
+# Rest of your code follows...
 
 def normalize_column_names(df):
     df.columns = df.columns.str.strip().str.lower()
@@ -59,6 +89,7 @@ def verify_datasets(dfs):
         # Check for required columns
         required_cols = ['country', 'year']
         missing_cols = [col for col in required_cols if col not in df.columns]
+        
         if missing_cols:
             print(f"Warning: Missing required columns: {missing_cols}")
         
@@ -396,14 +427,101 @@ def analyze_processed_data():
     except Exception as e:
         print(f"Error in data analysis: {e}")
 
-if __name__ == "__main__":
-    # First run the existing data processing
-    print("Step 1: Initial data processing")
-    if process_initial_data():
-        # Then run the existing analysis
-        print("\nStep 2: Analyzing processed data")
-        analyze_processed_data()
+def analyze_lfpr_correlations(datasets):
+    """
+    Enhanced LFPR correlation analysis with multiple testing correction
+    """
+    for year, df in datasets.items():
+        print(f"\nYear {year}:")
         
-        # Finally, run the standardization
-        print("\nStep 3: Standardizing datasets")
-        standardized_datasets = main_standardize()
+        # Calculate correlations
+        correlations = calculate_correlations(df)
+        
+        # Apply multiple testing corrections
+        corrected_results = apply_multiple_testing_corrections(correlations)
+        
+        # Create visualizations
+        create_correlation_plots({year: df})
+        
+        # Perform stratified analysis
+        stratified_results = perform_stratified_analysis({year: df})
+        
+        # Print results
+        print("\nCorrelation Results with Multiple Testing Corrections:")
+        for var, corr in corrected_results['correlations'].items():
+            print(f"\n{var}:")
+            print(f"  r = {corr:.3f}")
+            print(f"  Original p-value: {corrected_results['p_values'][var]:.3e}")
+            print(f"  Bonferroni p-value: {corrected_results['bonferroni_corrected_p'][var]:.3e}")
+            print(f"  Holm p-value: {corrected_results['holm_corrected_p'][var]:.3e}")
+            print(f"  FDR p-value: {corrected_results['fdr_bh_corrected_p'][var]:.3e}")
+
+if __name__ == "__main__":
+    # Create necessary directories
+    create_output_directories()
+    try:
+        # Step 1: Initial Processing
+        print("Step 1: Initial data processing")
+        if process_initial_data():
+            
+            # Step 2: Load and Analyze
+            print("\nStep 2: Loading and analyzing processed data")
+            datasets = load_merged_datasets()
+            
+            if datasets:
+                # Step 3: Get Common Countries
+                print("\nStep 3: Finding common countries")
+                common_countries = get_common_countries(datasets)
+                
+                if common_countries:
+                    # Step 4: Filter and Save
+                    print("\nStep 4: Filtering datasets")
+                    filtered_datasets = filter_and_save_datasets(datasets, common_countries)
+                    
+                    if filtered_datasets:
+                        # Step 5: Standardize
+                        print("\nStep 5: Standardizing data")
+                        standardized_datasets = {}
+                        for year, df in filtered_datasets.items():
+                            std_df = process_dataset(df, year)
+                            if std_df is not None:
+                                standardized_datasets[year] = std_df
+                        
+                        if standardized_datasets:
+                            # Step 6: Analysis
+                            print("\nStep 6: Performing analyses")
+                            
+                            # Correlation analysis
+                            print("\nPerforming correlation analysis...")
+                            analyze_correlations_with_correction(standardized_datasets)
+                            
+                            # LFPR analysis
+                            print("\nAnalyzing LFPR relationships...")
+                            analyze_lfpr_correlations(standardized_datasets)
+                            
+                            # Create visualizations
+                            print("\nCreating visualizations...")
+                            create_correlation_plots(standardized_datasets)
+                            create_advanced_visualizations(standardized_datasets)
+                            
+                            # Additional analyses
+                            print("\nPerforming additional analyses...")
+                            perform_stratified_analysis(standardized_datasets)
+                            robustness_checks(standardized_datasets)
+                            
+                            print("\nAnalysis complete! Check the 'processed_data' and 'plots' directories for results.")
+                        else:
+                            print("Error: Standardization failed")
+                    else:
+                        print("Error: Filtering failed")
+                else:
+                    print("Error: No common countries found")
+            else:
+                print("Error: Could not load datasets")
+        else:
+            print("Error: Initial processing failed")
+            
+    except Exception as e:
+        print(f"Error in main execution: {str(e)}")
+        import traceback
+        print(traceback.format_exc())

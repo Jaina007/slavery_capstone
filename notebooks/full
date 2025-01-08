@@ -1,0 +1,1301 @@
+# Imports and Setup
+import pandas as pd
+import numpy as np
+import os
+from scipy import stats
+from sklearn.preprocessing import StandardScaler
+import warnings
+from scipy.stats import ConstantInputWarning
+import matplotlib.pyplot as plt
+import seaborn as sns
+import statsmodels.api as sm
+from sklearn.linear_model import HuberRegressor
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+from statsmodels.stats.multitest import multipletests
+
+# Set up matplotlib backend and styling
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    plt.style.use('seaborn')
+    sns.set_theme(style="whitegrid", font_scale=1.2)
+except Exception as e:
+    print(f"Warning: Visualization setup error: {e}")
+
+# Suppress warnings
+warnings.filterwarnings('ignore', category=ConstantInputWarning)
+
+class ModernSlaveryAnalysis:
+    def __init__(self):
+        """Initialize analysis framework"""
+        self.create_output_directories()
+        self.alpha = 0.05  # significance level for hypothesis tests
+        
+    def create_output_directories(self):
+        """Create necessary output directories"""
+        self.directories = {
+            'data': 'processed_data',
+            'plots': 'plots',
+            'advanced_plots': 'plots/advanced',
+            'results': 'results'
+        }
+        for directory in self.directories.values():
+            os.makedirs(directory, exist_ok=True)
+
+    def load_and_process_data(self):
+        """Load and process all datasets"""
+        try:
+            # Load raw datasets
+            datasets = self.load_initial_datasets()
+            
+            # Process for each year
+            processed_data = {}
+            for year in [2016, 2018, 2023]:
+                df = self.process_year_data(datasets, year)
+                processed_data[year] = df
+            
+            return processed_data
+        except Exception as e:
+            print(f"Error in data loading and processing: {e}")
+            return None
+
+    def perform_multiple_testing_corrections(self, p_values, methods=['bonferroni', 'holm', 'simes']):
+        """
+        Perform multiple testing corrections using specified methods
+        
+        Parameters:
+        -----------
+        p_values : dict
+            Dictionary of variable names and their p-values
+        methods : list
+            List of correction methods to apply
+            
+        Returns:
+        --------
+        dict
+            Dictionary containing original and corrected p-values
+        """
+        results = {
+            'original': p_values,
+            'corrections': {}
+        }
+        
+        p_val_array = np.array(list(p_values.values()))
+        var_names = list(p_values.keys())
+        
+        try:
+            # Bonferroni correction
+            if 'bonferroni' in methods:
+                reject, p_corrected, _, _ = multipletests(p_val_array, alpha=self.alpha, method='bonferroni')
+                results['corrections']['bonferroni'] = dict(zip(var_names, p_corrected))
+            
+            # Holm correction
+            if 'holm' in methods:
+                reject, p_corrected, _, _ = multipletests(p_val_array, alpha=self.alpha, method='holm')
+                results['corrections']['holm'] = dict(zip(var_names, p_corrected))
+            
+            # Simes correction
+            if 'simes' in methods:
+                # Implement Simes procedure
+                n = len(p_val_array)
+                sorted_p = np.sort(p_val_array)
+                simes_critical = np.arange(1, n + 1) * self.alpha / n
+                reject = sorted_p <= simes_critical
+                
+                # Create dictionary of results
+                simes_results = dict(zip(var_names, reject))
+                results['corrections']['simes'] = simes_results
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error in multiple testing correction: {e}")
+            return None
+
+    def analyze_lfpr_relationships(self, data):
+        """
+        Analyze relationships between LFPR and modern slavery
+        
+        Parameters:
+        -----------
+        data : dict
+            Dictionary of dataframes for each year
+        """
+        try:
+            results = {}
+            
+            for year, df in data.items():
+                print(f"\nAnalyzing LFPR relationships for {year}")
+                
+                # Calculate correlations
+                lfpr_vars = ['lfpr_total', 'lfpr_female', 'lfpr_male']
+                correlations = {}
+                p_values = {}
+                
+                for var in lfpr_vars:
+                    if var in df.columns:
+                        mask = df[[var, 'prevalence_per_1000']].notna().all(axis=1)
+                        if mask.sum() > 1:
+                            corr, p_val = stats.pearsonr(
+                                df.loc[mask, var],
+                                df.loc[mask, 'prevalence_per_1000']
+                            )
+                            correlations[var] = corr
+                            p_values[var] = p_val
+                
+                # Perform multiple testing corrections
+                corrected_results = self.perform_multiple_testing_corrections(p_values)
+                
+                # Store results
+                results[year] = {
+                    'correlations': correlations,
+                    'original_p': p_values,
+                    'corrected_p': corrected_results['corrections']
+                }
+                
+                # Print results
+                print(f"\nResults for {year}:")
+                for var in lfpr_vars:
+                    if var in correlations:
+                        print(f"\n{var}:")
+                        print(f"Correlation: {correlations[var]:.3f}")
+                        print(f"Original p-value: {p_values[var]:.3e}")
+                        print("Corrected p-values:")
+                        for method, corrections in corrected_results['corrections'].items():
+                            if method != 'simes':
+                                print(f"  {method}: {corrections[var]:.3e}")
+                            else:
+                                print(f"  {method} reject H0: {corrections[var]}")
+                
+                # Create visualizations
+                self.create_lfpr_visualizations(df, year)
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error in LFPR analysis: {e}")
+            return None
+
+    def create_lfpr_visualizations(self, df, year):
+        """Create visualizations for LFPR analysis"""
+        try:
+            # Scatter plots with regression lines
+            lfpr_vars = ['lfpr_total', 'lfpr_female', 'lfpr_male']
+            
+            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+            fig.suptitle(f'LFPR vs Modern Slavery Prevalence ({year})')
+            
+            for i, var in enumerate(lfpr_vars):
+                if var in df.columns:
+                    sns.regplot(
+                        data=df,
+                        x=var,
+                        y='prevalence_per_1000',
+                        ax=axes[i],
+                        scatter_kws={'alpha':0.5},
+                        line_kws={'color': 'red'}
+                    )
+                    axes[i].set_title(var.replace('_', ' ').title())
+                    axes[i].set_xlabel('LFPR (%)')
+                    axes[i].set_ylabel('Modern Slavery Prevalence (per 1,000)')
+            
+            plt.tight_layout()
+            plt.savefig(f'{self.directories["plots"]}/lfpr_relationships_{year}.png')
+            plt.close()
+            
+        except Exception as e:
+            print(f"Error creating LFPR visualizations: {e}")
+
+        def perform_stratified_analysis(self, data):
+            """ Perform stratified analysis by region and income levels """
+        try:
+            results = {}
+            
+            for year, df in data.items():
+                print(f"\nStratified Analysis for {year}")
+                year_results = {}
+                
+                # Create income groups
+                if 'gdp_per_capita' in df.columns:
+                    df['income_group'] = pd.qcut(
+                        df['gdp_per_capita'],
+                        q=4,
+                        labels=['Low', 'Lower-Middle', 'Upper-Middle', 'High']
+                    )
+                
+                # Regional analysis
+                if 'region' in df.columns:
+                    regional_stats = df.groupby('region').agg({
+                        'prevalence_per_1000': ['mean', 'median', 'std', 'count'],
+                        'lfpr_total': ['mean', 'std'],
+                        'lfpr_female': ['mean', 'std'],
+                        'lfpr_male': ['mean', 'std']
+                    }).round(3)
+                    
+                    year_results['regional'] = regional_stats
+                    
+                    # Regional correlations with multiple testing correction
+                    regional_correlations = {}
+                    for region in df['region'].unique():
+                        region_df = df[df['region'] == region]
+                        correlations = {}
+                        p_values = {}
+                        
+                        for var in ['lfpr_total', 'lfpr_female', 'lfpr_male']:
+                            if var in region_df.columns:
+                                mask = region_df[[var, 'prevalence_per_1000']].notna().all(axis=1)
+                                if mask.sum() > 1:
+                                    corr, p_val = stats.pearsonr(
+                                        region_df.loc[mask, var],
+                                        region_df.loc[mask, 'prevalence_per_1000']
+                                    )
+                                    correlations[var] = corr
+                                    p_values[var] = p_val
+                        
+                        if p_values:
+                            corrected_results = self.perform_multiple_testing_corrections(p_values)
+                            regional_correlations[region] = {
+                                'correlations': correlations,
+                                'original_p': p_values,
+                                'corrected_p': corrected_results['corrections']
+                            }
+                    
+                    year_results['regional_correlations'] = regional_correlations
+                
+                # Income group analysis
+                if 'income_group' in df.columns:
+                    income_stats = df.groupby('income_group').agg({
+                        'prevalence_per_1000': ['mean', 'median', 'std', 'count'],
+                        'lfpr_total': ['mean', 'std'],
+                        'lfpr_female': ['mean', 'std'],
+                        'lfpr_male': ['mean', 'std']
+                    }).round(3)
+                    
+                    year_results['income'] = income_stats
+                    
+                    # Income group correlations
+                    income_correlations = {}
+                    for income_group in df['income_group'].unique():
+                        income_df = df[df['income_group'] == income_group]
+                        correlations = {}
+                        p_values = {}
+                        
+                        for var in ['lfpr_total', 'lfpr_female', 'lfpr_male']:
+                            if var in income_df.columns:
+                                mask = income_df[[var, 'prevalence_per_1000']].notna().all(axis=1)
+                                if mask.sum() > 1:
+                                    corr, p_val = stats.pearsonr(
+                                        income_df.loc[mask, var],
+                                        income_df.loc[mask, 'prevalence_per_1000']
+                                    )
+                                    correlations[var] = corr
+                                    p_values[var] = p_val
+                        
+                        if p_values:
+                            corrected_results = self.perform_multiple_testing_corrections(p_values)
+                            income_correlations[income_group] = {
+                                'correlations': correlations,
+                                'original_p': p_values,
+                                'corrected_p': corrected_results['corrections']
+                            }
+                    
+                    year_results['income_correlations'] = income_correlations
+                
+                results[year] = year_results
+                
+                # Create visualizations for stratified analysis
+                self.create_stratified_visualizations(df, year)
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error in stratified analysis: {e}")
+            return None
+
+    def perform_regression_analysis(self, data):
+        """
+        Perform comprehensive regression analysis
+        """
+        try:
+            results = {}
+            
+            for year, df in data.items():
+                print(f"\nRegression Analysis for {year}")
+                
+                # Prepare variables
+                dependent_var = 'prevalence_per_1000'
+                lfpr_vars = ['lfpr_total', 'lfpr_female', 'lfpr_male']
+                control_vars = ['gdp_per_capita', 'corruption_score', 'democracy_score',
+                              'vulnerability_total', 'government_response_total']
+                
+                # Create models with different specifications
+                model_results = {}
+                
+                # 1. LFPR only models
+                for lfpr_var in lfpr_vars:
+                    if lfpr_var in df.columns:
+                        X = df[[lfpr_var]].copy()
+                        y = df[dependent_var]
+                        
+                        # Add constant
+                        X = sm.add_constant(X)
+                        
+                        # Fit model
+                        model = sm.OLS(y, X).fit()
+                        
+                        # Store results
+                        model_results[f'model_{lfpr_var}'] = {
+                            'params': model.params,
+                            'pvalues': model.pvalues,
+                            'rsquared': model.rsquared,
+                            'rsquared_adj': model.rsquared_adj,
+                            'aic': model.aic,
+                            'bic': model.bic
+                        }
+                
+                # 2. Full model with controls
+                available_controls = [var for var in control_vars if var in df.columns]
+                if available_controls:
+                    X = df[['lfpr_total'] + available_controls].copy()
+                    y = df[dependent_var]
+                    
+                    # Add constant
+                    X = sm.add_constant(X)
+                    
+                    # Fit model
+                    model = sm.OLS(y, X).fit()
+                    
+                    # Store results
+                    model_results['full_model'] = {
+                        'params': model.params,
+                        'pvalues': model.pvalues,
+                        'rsquared': model.rsquared,
+                        'rsquared_adj': model.rsquared_adj,
+                        'aic': model.aic,
+                        'bic': model.bic
+                    }
+                
+                # 3. Robust regression
+                robust_reg = HuberRegressor()
+                X = df[['lfpr_total'] + available_controls]
+                y = df[dependent_var]
+                
+                robust_reg.fit(X, y)
+                
+                model_results['robust_model'] = {
+                    'coefficients': dict(zip(X.columns, robust_reg.coef_)),
+                    'intercept': robust_reg.intercept_
+                }
+                
+                results[year] = model_results
+                
+                # Create regression visualizations
+                self.create_regression_visualizations(df, year, model_results)
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error in regression analysis: {e}")
+            return None
+
+    def create_stratified_visualizations(self, df, year):
+        """Create visualizations for stratified analysis"""
+        try:
+            # 1. Regional box plots
+            if 'region' in df.columns:
+                plt.figure(figsize=(12, 6))
+                sns.boxplot(data=df, x='region', y='prevalence_per_1000')
+                plt.xticks(rotation=45)
+                plt.title(f'Modern Slavery Prevalence by Region ({year})')
+                plt.tight_layout()
+                plt.savefig(f'{self.directories["plots"]}/regional_boxplot_{year}.png')
+                plt.close()
+            
+            # 2. Income group box plots
+            if 'income_group' in df.columns:
+                plt.figure(figsize=(10, 6))
+                sns.boxplot(data=df, x='income_group', y='prevalence_per_1000')
+                plt.title(f'Modern Slavery Prevalence by Income Group ({year})')
+                plt.tight_layout()
+                plt.savefig(f'{self.directories["plots"]}/income_boxplot_{year}.png')
+                plt.close()
+            
+            # 3. LFPR by region scatter plots
+            if 'region' in df.columns and 'lfpr_total' in df.columns:
+                plt.figure(figsize=(15, 8))
+                sns.scatterplot(data=df, x='lfpr_total', y='prevalence_per_1000', hue='region')
+                plt.title(f'LFPR vs Modern Slavery by Region ({year})')
+                plt.tight_layout()
+                plt.savefig(f'{self.directories["plots"]}/lfpr_by_region_{year}.png')
+                plt.close()
+            
+        except Exception as e:
+            print(f"Error creating stratified visualizations: {e}")
+
+    def create_regression_visualizations(self, df, year, model_results):
+        """Create visualizations for regression analysis"""
+        try:
+            # 1. Actual vs Predicted plot
+            if 'full_model' in model_results:
+                X = df[['lfpr_total'] + [col for col in df.columns if col.endswith('_score')]]
+                X = sm.add_constant(X)
+                y = df['prevalence_per_1000']
+                
+                model = sm.OLS(y, X).fit()
+                predicted = model.predict(X)
+                
+                plt.figure(figsize=(8, 8))
+                sns.scatterplot(x=y, y=predicted)
+                plt.plot([y.min(), y.max()], [y.min(), y.max()], 'r--', lw=2)
+                plt.xlabel('Actual Prevalence')
+                plt.ylabel('Predicted Prevalence')
+                plt.title(f'Actual vs Predicted Values ({year})')
+                plt.tight_layout()
+                plt.savefig(f'{self.directories["plots"]}/actual_vs_predicted_{year}.png')
+                plt.close()
+            
+            # 2. Residual plots
+            if 'full_model' in model_results:
+                fig, axes = plt.subplots(2, 2, figsize=(15, 15))
+                fig.suptitle(f'Residual Diagnostics ({year})')
+                
+                # Residuals vs Fitted
+                sns.residplot(x=predicted, y=y, ax=axes[0,0])
+                axes[0,0].set_title('Residuals vs Fitted')
+                
+                # Q-Q plot
+                stats.probplot(model.resid, dist="norm", plot=axes[0,1])
+                axes[0,1].set_title('Normal Q-Q')
+                
+                # Scale-Location
+                sns.regplot(x=predicted, y=np.sqrt(np.abs(model.resid)), ax=axes[1,0])
+                axes[1,0].set_title('Scale-Location')
+                
+                # Residuals vs Leverage
+                influence = model.get_influence()
+                leverage = influence.hat_matrix_diag
+                sns.scatterplot(x=leverage, y=model.resid, ax=axes[1,1])
+                axes[1,1].set_title('Residuals vs Leverage')
+                
+                plt.tight_layout()
+                plt.savefig(f'{self.directories["plots"]}/residual_diagnostics_{year}.png')
+                plt.close()
+            
+        except Exception as e:
+            print(f"Error creating regression visualizations: {e}")
+
+        def perform_stratified_analysis(self, data):
+            """Perform stratified analysis by region and income levels"""
+        try:
+            results = {}
+            
+            for year, df in data.items():
+                print(f"\nStratified Analysis for {year}")
+                year_results = {}
+                
+                # Create income groups
+                if 'gdp_per_capita' in df.columns:
+                    df['income_group'] = pd.qcut(
+                        df['gdp_per_capita'],
+                        q=4,
+                        labels=['Low', 'Lower-Middle', 'Upper-Middle', 'High']
+                    )
+                
+                # Regional analysis
+                if 'region' in df.columns:
+                    regional_stats = df.groupby('region').agg({
+                        'prevalence_per_1000': ['mean', 'median', 'std', 'count'],
+                        'lfpr_total': ['mean', 'std'],
+                        'lfpr_female': ['mean', 'std'],
+                        'lfpr_male': ['mean', 'std']
+                    }).round(3)
+                    
+                    year_results['regional'] = regional_stats
+                    
+                    # Regional correlations with multiple testing correction
+                    regional_correlations = {}
+                    for region in df['region'].unique():
+                        region_df = df[df['region'] == region]
+                        correlations = {}
+                        p_values = {}
+                        
+                        for var in ['lfpr_total', 'lfpr_female', 'lfpr_male']:
+                            if var in region_df.columns:
+                                mask = region_df[[var, 'prevalence_per_1000']].notna().all(axis=1)
+                                if mask.sum() > 1:
+                                    corr, p_val = stats.pearsonr(
+                                        region_df.loc[mask, var],
+                                        region_df.loc[mask, 'prevalence_per_1000']
+                                    )
+                                    correlations[var] = corr
+                                    p_values[var] = p_val
+                        
+                        if p_values:
+                            corrected_results = self.perform_multiple_testing_corrections(p_values)
+                            regional_correlations[region] = {
+                                'correlations': correlations,
+                                'original_p': p_values,
+                                'corrected_p': corrected_results['corrections']
+                            }
+                    
+                    year_results['regional_correlations'] = regional_correlations
+                
+                # Income group analysis
+                if 'income_group' in df.columns:
+                    income_stats = df.groupby('income_group').agg({
+                        'prevalence_per_1000': ['mean', 'median', 'std', 'count'],
+                        'lfpr_total': ['mean', 'std'],
+                        'lfpr_female': ['mean', 'std'],
+                        'lfpr_male': ['mean', 'std']
+                    }).round(3)
+                    
+                    year_results['income'] = income_stats
+                    
+                    # Income group correlations
+                    income_correlations = {}
+                    for income_group in df['income_group'].unique():
+                        income_df = df[df['income_group'] == income_group]
+                        correlations = {}
+                        p_values = {}
+                        
+                        for var in ['lfpr_total', 'lfpr_female', 'lfpr_male']:
+                            if var in income_df.columns:
+                                mask = income_df[[var, 'prevalence_per_1000']].notna().all(axis=1)
+                                if mask.sum() > 1:
+                                    corr, p_val = stats.pearsonr(
+                                        income_df.loc[mask, var],
+                                        income_df.loc[mask, 'prevalence_per_1000']
+                                    )
+                                    correlations[var] = corr
+                                    p_values[var] = p_val
+                        
+                        if p_values:
+                            corrected_results = self.perform_multiple_testing_corrections(p_values)
+                            income_correlations[income_group] = {
+                                'correlations': correlations,
+                                'original_p': p_values,
+                                'corrected_p': corrected_results['corrections']
+                            }
+                    
+                    year_results['income_correlations'] = income_correlations
+                
+                results[year] = year_results
+                
+                # Create visualizations for stratified analysis
+                self.create_stratified_visualizations(df, year)
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error in stratified analysis: {e}")
+            return None
+
+    def perform_regression_analysis(self, data):
+        """
+        Perform comprehensive regression analysis
+        """
+        try:
+            results = {}
+            
+            for year, df in data.items():
+                print(f"\nRegression Analysis for {year}")
+                
+                # Prepare variables
+                dependent_var = 'prevalence_per_1000'
+                lfpr_vars = ['lfpr_total', 'lfpr_female', 'lfpr_male']
+                control_vars = ['gdp_per_capita', 'corruption_score', 'democracy_score',
+                              'vulnerability_total', 'government_response_total']
+                
+                # Create models with different specifications
+                model_results = {}
+                
+                # 1. LFPR only models
+                for lfpr_var in lfpr_vars:
+                    if lfpr_var in df.columns:
+                        X = df[[lfpr_var]].copy()
+                        y = df[dependent_var]
+                        
+                        # Add constant
+                        X = sm.add_constant(X)
+                        
+                        # Fit model
+                        model = sm.OLS(y, X).fit()
+                        
+                        # Store results
+                        model_results[f'model_{lfpr_var}'] = {
+                            'params': model.params,
+                            'pvalues': model.pvalues,
+                            'rsquared': model.rsquared,
+                            'rsquared_adj': model.rsquared_adj,
+                            'aic': model.aic,
+                            'bic': model.bic
+                        }
+                
+                # 2. Full model with controls
+                available_controls = [var for var in control_vars if var in df.columns]
+                if available_controls:
+                    X = df[['lfpr_total'] + available_controls].copy()
+                    y = df[dependent_var]
+                    
+                    # Add constant
+                    X = sm.add_constant(X)
+                    
+                    # Fit model
+                    model = sm.OLS(y, X).fit()
+                    
+                    # Store results
+                    model_results['full_model'] = {
+                        'params': model.params,
+                        'pvalues': model.pvalues,
+                        'rsquared': model.rsquared,
+                        'rsquared_adj': model.rsquared_adj,
+                        'aic': model.aic,
+                        'bic': model.bic
+                    }
+                
+                # 3. Robust regression
+                robust_reg = HuberRegressor()
+                X = df[['lfpr_total'] + available_controls]
+                y = df[dependent_var]
+                
+                robust_reg.fit(X, y)
+                
+                model_results['robust_model'] = {
+                    'coefficients': dict(zip(X.columns, robust_reg.coef_)),
+                    'intercept': robust_reg.intercept_
+                }
+                
+                results[year] = model_results
+                
+                # Create regression visualizations
+                self.create_regression_visualizations(df, year, model_results)
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error in regression analysis: {e}")
+            return None
+
+    def create_stratified_visualizations(self, df, year):
+        """Create visualizations for stratified analysis"""
+        try:
+            # 1. Regional box plots
+            if 'region' in df.columns:
+                plt.figure(figsize=(12, 6))
+                sns.boxplot(data=df, x='region', y='prevalence_per_1000')
+                plt.xticks(rotation=45)
+                plt.title(f'Modern Slavery Prevalence by Region ({year})')
+                plt.tight_layout()
+                plt.savefig(f'{self.directories["plots"]}/regional_boxplot_{year}.png')
+                plt.close()
+            
+            # 2. Income group box plots
+            if 'income_group' in df.columns:
+                plt.figure(figsize=(10, 6))
+                sns.boxplot(data=df, x='income_group', y='prevalence_per_1000')
+                plt.title(f'Modern Slavery Prevalence by Income Group ({year})')
+                plt.tight_layout()
+                plt.savefig(f'{self.directories["plots"]}/income_boxplot_{year}.png')
+                plt.close()
+            
+            # 3. LFPR by region scatter plots
+            if 'region' in df.columns and 'lfpr_total' in df.columns:
+                plt.figure(figsize=(15, 8))
+                sns.scatterplot(data=df, x='lfpr_total', y='prevalence_per_1000', hue='region')
+                plt.title(f'LFPR vs Modern Slavery by Region ({year})')
+                plt.tight_layout()
+                plt.savefig(f'{self.directories["plots"]}/lfpr_by_region_{year}.png')
+                plt.close()
+            
+        except Exception as e:
+            print(f"Error creating stratified visualizations: {e}")
+
+    def create_regression_visualizations(self, df, year, model_results):
+        """Create visualizations for regression analysis"""
+        try:
+            # 1. Actual vs Predicted plot
+            if 'full_model' in model_results:
+                X = df[['lfpr_total'] + [col for col in df.columns if col.endswith('_score')]]
+                X = sm.add_constant(X)
+                y = df['prevalence_per_1000']
+                
+                model = sm.OLS(y, X).fit()
+                predicted = model.predict(X)
+                
+                plt.figure(figsize=(8, 8))
+                sns.scatterplot(x=y, y=predicted)
+                plt.plot([y.min(), y.max()], [y.min(), y.max()], 'r--', lw=2)
+                plt.xlabel('Actual Prevalence')
+                plt.ylabel('Predicted Prevalence')
+                plt.title(f'Actual vs Predicted Values ({year})')
+                plt.tight_layout()
+                plt.savefig(f'{self.directories["plots"]}/actual_vs_predicted_{year}.png')
+                plt.close()
+            
+            # 2. Residual plots
+            if 'full_model' in model_results:
+                fig, axes = plt.subplots(2, 2, figsize=(15, 15))
+                fig.suptitle(f'Residual Diagnostics ({year})')
+                
+                # Residuals vs Fitted
+                sns.residplot(x=predicted, y=y, ax=axes[0,0])
+                axes[0,0].set_title('Residuals vs Fitted')
+                
+                # Q-Q plot
+                stats.probplot(model.resid, dist="norm", plot=axes[0,1])
+                axes[0,1].set_title('Normal Q-Q')
+                
+                # Scale-Location
+                sns.regplot(x=predicted, y=np.sqrt(np.abs(model.resid)), ax=axes[1,0])
+                axes[1,0].set_title('Scale-Location')
+                
+                # Residuals vs Leverage
+                influence = model.get_influence()
+                leverage = influence.hat_matrix_diag
+                sns.scatterplot(x=leverage, y=model.resid, ax=axes[1,1])
+                axes[1,1].set_title('Residuals vs Leverage')
+                
+                plt.tight_layout()
+                plt.savefig(f'{self.directories["plots"]}/residual_diagnostics_{year}.png')
+                plt.close()
+            
+        except Exception as e:
+            print(f"Error creating regression visualizations: {e}")
+
+        def analyze_gender_disparities(self, data):
+            """ Analyze gender disparities in LFPR and their relationship with modern slavery"""
+        try:
+            results = {}
+            
+            for year, df in data.items():
+                print(f"\nAnalyzing Gender Disparities for {year}")
+                
+                # Calculate gender gap in LFPR
+                if all(col in df.columns for col in ['lfpr_female', 'lfpr_male']):
+                    df['lfpr_gender_gap'] = df['lfpr_male'] - df['lfpr_female']
+                    
+                    # Correlation analysis with multiple testing
+                    variables = ['lfpr_gender_gap', 'lfpr_female', 'lfpr_male']
+                    correlations = {}
+                    p_values = {}
+                    
+                    for var in variables:
+                        mask = df[[var, 'prevalence_per_1000']].notna().all(axis=1)
+                        if mask.sum() > 1:
+                            corr, p_val = stats.pearsonr(
+                                df.loc[mask, var],
+                                df.loc[mask, 'prevalence_per_1000']
+                            )
+                            correlations[var] = corr
+                            p_values[var] = p_val
+                    
+                    # Apply multiple testing corrections
+                    corrected_results = self.perform_multiple_testing_corrections(
+                        p_values,
+                        methods=['bonferroni', 'holm', 'simes']
+                    )
+                    
+                    results[year] = {
+                        'correlations': correlations,
+                        'original_p': p_values,
+                        'corrected_p': corrected_results['corrections']
+                    }
+                    
+                    # Create gender disparity visualizations
+                    self.create_gender_disparity_plots(df, year)
+                    
+                    # Quartile analysis of gender gap
+                    df['gender_gap_quartile'] = pd.qcut(
+                        df['lfpr_gender_gap'],
+                        q=4,
+                        labels=['Low', 'Medium-Low', 'Medium-High', 'High']
+                    )
+                    
+                    quartile_stats = df.groupby('gender_gap_quartile').agg({
+                        'prevalence_per_1000': ['mean', 'median', 'std', 'count'],
+                        'lfpr_gender_gap': ['mean', 'std']
+                    }).round(3)
+                    
+                    results[year]['quartile_analysis'] = quartile_stats
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error in gender disparity analysis: {e}")
+            return None
+
+    def generate_academic_tables(self, results):
+        """
+        Generate publication-ready LaTeX tables
+        """
+        try:
+            # Table 1: Descriptive Statistics
+            desc_stats = []
+            for year, data in results.items():
+                if 'descriptive' in data:
+                    stats_df = pd.DataFrame(data['descriptive'])
+                    stats_df['Year'] = year
+                    desc_stats.append(stats_df)
+            
+            if desc_stats:
+                combined_stats = pd.concat(desc_stats)
+                combined_stats.to_latex(
+                    f'{self.directories["results"]}/table1_descriptive_stats.tex',
+                    float_format="%.3f"
+                )
+            
+            # Table 2: Multiple Testing Results
+            testing_results = []
+            for year, data in results.items():
+                if 'lfpr_analysis' in data:
+                    results_df = pd.DataFrame({
+                        'Variable': list(data['lfpr_analysis']['correlations'].keys()),
+                        'Correlation': list(data['lfpr_analysis']['correlations'].values()),
+                        'Original_p': list(data['lfpr_analysis']['original_p'].values()),
+                        'Bonferroni_p': list(data['lfpr_analysis']['corrected_p']['bonferroni'].values()),
+                        'Holm_p': list(data['lfpr_analysis']['corrected_p']['holm'].values()),
+                        'Simes_reject': list(data['lfpr_analysis']['corrected_p']['simes'].values())
+                    })
+                    results_df['Year'] = year
+                    testing_results.append(results_df)
+            
+            if testing_results:
+                combined_results = pd.concat(testing_results)
+                combined_results.to_latex(
+                    f'{self.directories["results"]}/table2_multiple_testing.tex',
+                    float_format="%.3e"
+                )
+            
+        except Exception as e:
+            print(f"Error generating academic tables: {e}")
+
+    def generate_paper_figures(self, data):
+        """
+        Generate publication-quality figures
+        """
+        try:
+            # Figure 1: LFPR and Modern Slavery Relationship
+            plt.figure(figsize=(12, 8))
+            for year, df in data.items():
+                sns.scatterplot(
+                    data=df,
+                    x='lfpr_total',
+                    y='prevalence_per_1000',
+                    label=str(year)
+                )
+            
+            plt.title('Labor Force Participation Rate and Modern Slavery Prevalence')
+            plt.xlabel('Labor Force Participation Rate (%)')
+            plt.ylabel('Modern Slavery Prevalence (per 1,000)')
+            plt.tight_layout()
+            plt.savefig(f'{self.directories["plots"]}/figure1_lfpr_slavery.pdf', dpi=300)
+            plt.close()
+            
+            # Figure 2: Gender Gap Analysis
+            plt.figure(figsize=(12, 8))
+            for year, df in data.items():
+                if 'lfpr_gender_gap' in df.columns:
+                    sns.scatterplot(
+                        data=df,
+                        x='lfpr_gender_gap',
+                        y='prevalence_per_1000',
+                        label=str(year)
+                    )
+            
+            plt.title('LFPR Gender Gap and Modern Slavery Prevalence')
+            plt.xlabel('LFPR Gender Gap (Male - Female)')
+            plt.ylabel('Modern Slavery Prevalence (per 1,000)')
+            plt.tight_layout()
+            plt.savefig(f'{self.directories["plots"]}/figure2_gender_gap.pdf', dpi=300)
+            plt.close()
+            
+        except Exception as e:
+            print(f"Error generating paper figures: {e}")
+
+    def generate_appendix_materials(self, results):
+        """
+        Generate appendix materials for the paper
+        """
+        try:
+            appendix = []
+            appendix.append("\\section*{Appendix}")
+            
+            # A1: Detailed Methodology
+            appendix.append("\\subsection*{A1. Detailed Methodology}")
+            appendix.append("\\subsubsection*{Multiple Testing Corrections}")
+            appendix.append("We employed three different multiple testing correction methods:")
+            appendix.append("\\begin{itemize}")
+            appendix.append("\\item Bonferroni correction")
+            appendix.append("\\item Holm's step-down procedure")
+            appendix.append("\\item Simes' procedure")
+            appendix.append("\\end{itemize}")
+            
+            # A2: Robustness Checks
+            appendix.append("\\subsection*{A2. Robustness Checks}")
+            for year, data in results.items():
+                if 'robustness' in data:
+                    appendix.append(f"\\subsubsection*{{{year} Analysis}}")
+                    appendix.append(data['robustness']['summary'])
+            
+            # Save appendix
+            with open(f'{self.directories["results"]}/appendix.tex', 'w') as f:
+                f.write('\n'.join(appendix))
+            
+        except Exception as e:
+            print(f"Error generating appendix materials: {e}")
+
+    def run_paper_analysis(self):
+        """
+        Run analysis specifically for the paper
+        """
+        try:
+            print("Running analysis for paper on LFPR and Modern Slavery...")
+            
+            # Process data
+            processed_data = self.process_data_for_analysis()
+            if processed_data is None:
+                raise ValueError("Data processing failed")
+            
+            results = {}
+            
+            # 1. Gender disparity analysis
+            print("\nAnalyzing gender disparities...")
+            gender_results = self.analyze_gender_disparities(processed_data)
+            
+            # 2. Main analyses with multiple testing
+            for year, df in processed_data.items():
+                results[year] = {
+                    'gender_analysis': gender_results.get(year, {}),
+                    'lfpr_analysis': self.analyze_lfpr_relationships(df),
+                    'regression': self.perform_regression_analysis(df),
+                    'stratified': self.perform_stratified_analysis(df)
+                }
+            
+            # Generate paper materials
+            print("\nGenerating paper materials...")
+            self.generate_academic_tables(results)
+            self.generate_paper_figures(processed_data)
+            self.generate_appendix_materials(results)
+            
+            print("\nAnalysis complete! Check the results directory for paper materials.")
+            return results
+            
+        except Exception as e:
+            print(f"Error in paper analysis: {e}")
+            return None
+
+if __name__ == "__main__":
+    try:
+        # Initialize analysis
+        analysis = ModernSlaveryAnalysis()
+        
+        # Run paper-specific analysis
+        results = analysis.run_paper_analysis()
+        
+        if results is not None:
+            print("\nPaper analysis completed successfully!")
+            print("Generated materials:")
+            print("1. LaTeX tables in results directory")
+            print("2. Publication-quality figures in plots directory")
+            print("3. Appendix materials in results directory")
+        else:
+            print("\nAnalysis failed!")
+            
+    except Exception as e:
+        print(f"Error in main execution: {e}")
+
+    def perform_sensitivity_analysis(self, data):
+        """
+        Perform sensitivity analysis to test robustness of findings
+        """
+        try:
+            sensitivity_results = {}
+            
+            for year, df in data.items():
+                print(f"\nPerforming sensitivity analysis for {year}")
+                year_results = {}
+                
+                # 1. Outlier Impact Analysis
+                outlier_results = self.analyze_outlier_impact(df)
+                year_results['outlier_analysis'] = outlier_results
+                
+                # 2. Alternative Specifications
+                spec_results = self.test_alternative_specifications(df)
+                year_results['alternative_specs'] = spec_results
+                
+                # 3. Subsample Analysis
+                subsample_results = self.perform_subsample_analysis(df)
+                year_results['subsample_analysis'] = subsample_results
+                
+                sensitivity_results[year] = year_results
+            
+            return sensitivity_results
+            
+        except Exception as e:
+            print(f"Error in sensitivity analysis: {e}")
+            return None
+
+    def analyze_outlier_impact(self, df):
+        """
+        Analyze the impact of outliers on main findings
+        """
+        try:
+            results = {}
+            
+            # 1. Identify outliers using different methods
+            for col in ['prevalence_per_1000', 'lfpr_total', 'lfpr_female', 'lfpr_male']:
+                if col in df.columns:
+                    # IQR method
+                    Q1 = df[col].quantile(0.25)
+                    Q3 = df[col].quantile(0.75)
+                    IQR = Q3 - Q1
+                    outliers_iqr = df[
+                        (df[col] < (Q1 - 1.5 * IQR)) | 
+                        (df[col] > (Q3 + 1.5 * IQR))
+                    ]
+                    
+                    # Z-score method
+                    z_scores = np.abs(stats.zscore(df[col]))
+                    outliers_z = df[z_scores > 3]
+                    
+                    results[col] = {
+                        'iqr_outliers': len(outliers_iqr),
+                        'z_score_outliers': len(outliers_z)
+                    }
+            
+            # 2. Compute correlations with and without outliers
+            base_correlations = {}
+            robust_correlations = {}
+            
+            for col in ['lfpr_total', 'lfpr_female', 'lfpr_male']:
+                if col in df.columns:
+                    # Base correlation
+                    corr, p_val = stats.pearsonr(
+                        df[col],
+                        df['prevalence_per_1000']
+                    )
+                    base_correlations[col] = {'corr': corr, 'p_val': p_val}
+                    
+                    # Robust correlation (excluding outliers)
+                    z_scores = np.abs(stats.zscore(df[col]))
+                    robust_df = df[z_scores <= 3]
+                    corr, p_val = stats.pearsonr(
+                        robust_df[col],
+                        robust_df['prevalence_per_1000']
+                    )
+                    robust_correlations[col] = {'corr': corr, 'p_val': p_val}
+            
+            results['correlations'] = {
+                'base': base_correlations,
+                'robust': robust_correlations
+            }
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error in outlier analysis: {e}")
+            return None
+
+    def test_alternative_specifications(self, df):
+        """
+        Test alternative model specifications
+        """
+        try:
+            results = {}
+            
+            # 1. Log transformations
+            log_df = df.copy()
+            for col in ['prevalence_per_1000', 'gdp_per_capita']:
+                if col in df.columns:
+                    log_df[f'log_{col}'] = np.log1p(df[col])
+            
+            # 2. Different model specifications
+            specifications = {
+                'base': ['lfpr_total'],
+                'with_gender': ['lfpr_female', 'lfpr_male'],
+                'with_controls': ['lfpr_total', 'gdp_per_capita', 'corruption_score'],
+                'log_spec': ['log_prevalence_per_1000', 'log_gdp_per_capita', 'lfpr_total']
+            }
+            
+            for spec_name, variables in specifications.items():
+                if all(var in log_df.columns for var in variables):
+                    # Prepare data
+                    X = log_df[variables]
+                    y = log_df['prevalence_per_1000']
+                    
+                    # Add constant
+                    X = sm.add_constant(X)
+                    
+                    # Fit model
+                    model = sm.OLS(y, X).fit()
+                    
+                    # Store results
+                    results[spec_name] = {
+                        'params': model.params.to_dict(),
+                        'pvalues': model.pvalues.to_dict(),
+                        'rsquared': model.rsquared,
+                        'aic': model.aic,
+                        'bic': model.bic
+                    }
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error in alternative specifications: {e}")
+            return None
+
+    def perform_subsample_analysis(self, df):
+        """
+        Perform analysis on different subsamples
+        """
+        try:
+            results = {}
+            
+            # 1. By income level
+            if 'gdp_per_capita' in df.columns:
+                df['income_group'] = pd.qcut(
+                    df['gdp_per_capita'],
+                    q=4,
+                    labels=['Low', 'Lower-Middle', 'Upper-Middle', 'High']
+                )
+                
+                income_results = {}
+                for income_group in df['income_group'].unique():
+                    subset = df[df['income_group'] == income_group]
+                    
+                    # Calculate correlations
+                    correlations = {}
+                    p_values = {}
+                    for col in ['lfpr_total', 'lfpr_female', 'lfpr_male']:
+                        if col in subset.columns:
+                            corr, p_val = stats.pearsonr(
+                                subset[col],
+                                subset['prevalence_per_1000']
+                            )
+                            correlations[col] = corr
+                            p_values[col] = p_val
+                    
+                    # Apply multiple testing corrections
+                    corrected_results = self.perform_multiple_testing_corrections(
+                        p_values,
+                        methods=['bonferroni', 'holm', 'simes']
+                    )
+                    
+                    income_results[income_group] = {
+                        'correlations': correlations,
+                        'original_p': p_values,
+                        'corrected_p': corrected_results['corrections']
+                    }
+                
+                results['income_groups'] = income_results
+            
+            # 2. By region
+            if 'region' in df.columns:
+                region_results = {}
+                for region in df['region'].unique():
+                    subset = df[df['region'] == region]
+                    
+                    # Calculate correlations
+                    correlations = {}
+                    p_values = {}
+                    for col in ['lfpr_total', 'lfpr_female', 'lfpr_male']:
+                        if col in subset.columns:
+                            corr, p_val = stats.pearsonr(
+                                subset[col],
+                                subset['prevalence_per_1000']
+                            )
+                            correlations[col] = corr
+                            p_values[col] = p_val
+                    
+                    # Apply multiple testing corrections
+                    corrected_results = self.perform_multiple_testing_corrections(
+                        p_values,
+                        methods=['bonferroni', 'holm', 'simes']
+                    )
+                    
+                    region_results[region] = {
+                        'correlations': correlations,
+                        'original_p': p_values,
+                        'corrected_p': corrected_results['corrections']
+                    }
+                
+                results['regions'] = region_results
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error in subsample analysis: {e}")
+            return None
+
+    def generate_sensitivity_report(self, sensitivity_results):
+        """
+        Generate detailed sensitivity analysis report
+        """
+        try:
+            report = []
+            report.append("\\section*{Sensitivity Analysis Report}")
+            
+            for year, results in sensitivity_results.items():
+                report.append(f"\\subsection*{{Analysis for {year}}}")
+                
+                # 1. Outlier Analysis
+                if 'outlier_analysis' in results:
+                    report.append("\\subsubsection*{Outlier Analysis}")
+                    outlier_results = results['outlier_analysis']
+                    
+                    report.append("\\paragraph{Identified Outliers}")
+                    for var, counts in outlier_results.items():
+                        if isinstance(counts, dict) and 'iqr_outliers' in counts:
+                            report.append(f"{var}:")
+                            report.append(f"- IQR method: {counts['iqr_outliers']} outliers")
+                            report.append(f"- Z-score method: {counts['z_score_outliers']} outliers")
+                    
+                    report.append("\\paragraph{Impact on Correlations}")
+                    if 'correlations' in outlier_results:
+                        for method, corrs in outlier_results['correlations'].items():
+                            report.append(f"\n{method.title()} Correlations:")
+                            for var, stats in corrs.items():
+                                report.append(f"- {var}: r={stats['corr']:.3f} (p={stats['p_val']:.3e})")
+                
+                # 2. Alternative Specifications
+                if 'alternative_specs' in results:
+                    report.append("\\subsubsection*{Alternative Specifications}")
+                    spec_results = results['alternative_specs']
+                    
+                    for spec_name, stats in spec_results.items():
+                        report.append(f"\n{spec_name.replace('_', ' ').title()}:")
+                        report.append(f"R-squared: {stats['rsquared']:.3f}")
+                        report.append(f"AIC: {stats['aic']:.3f}")
+                        report.append(f"BIC: {stats['bic']:.3f}")
+                        
+                        report.append("Coefficients:")
+                        for var, coef in stats['params'].items():
+                            p_val = stats['pvalues'][var]
+                            report.append(f"- {var}: {coef:.3f} (p={p_val:.3e})")
+                
+                # 3. Subsample Analysis
+                if 'subsample_analysis' in results:
+                    report.append("\\subsubsection*{Subsample Analysis}")
+                    subsample_results = results['subsample_analysis']
+                    
+                    if 'income_groups' in subsample_results:
+                        report.append("\\paragraph{By Income Group}")
+                        for group, stats in subsample_results['income_groups'].items():
+                            report.append(f"\n{group}:")
+                            for var, corr in stats['correlations'].items():
+                                orig_p = stats['original_p'][var]
+                                bonf_p = stats['corrected_p']['bonferroni'][var]
+                                holm_p = stats['corrected_p']['holm'][var]
+                                report.append(f"- {var}: r={corr:.3f}")
+                                report.append(f"  Original p={orig_p:.3e}")
+                                report.append(f"  Bonferroni p={bonf_p:.3e}")
+                                report.append(f"  Holm p={holm_p:.3e}")
+            
+            # Save report
+            with open(f'{self.directories["results"]}/sensitivity_analysis.tex', 'w') as f:
+                f.write('\n'.join(report))
+            
+            print("Sensitivity analysis report generated successfully")
+            
+        except Exception as e:
+            print(f"Error generating sensitivity report: {e}")        
