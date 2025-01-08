@@ -576,7 +576,7 @@ def perform_regression_analysis(datasets):
             
             # Independent variables
             predictors = [
-                'vulnerability_total', 'governance_score', 'corruption_score',
+                'lfpr_total', 'vulnerability_total', 'governance_score', 'corruption_score',
                 'democracy_score', 'basic_needs_score', 'inequality_score',
                 'conflict_score', 'government_response_total'
             ]
